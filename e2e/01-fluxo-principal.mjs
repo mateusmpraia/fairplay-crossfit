@@ -1,5 +1,5 @@
 // Fluxo principal: acesso sem login, cadastro com vínculo de histórico, login, painéis e gestão de eventos.
-import { BASE, gerarCpf, executarTeste } from './apoio.mjs';
+import { BASE, ADMIN, gerarCpf, executarTeste } from './apoio.mjs';
 
 const CPF = gerarCpf(901000001);
 const CPF_DIGITOS = CPF.replace(/\D/g, '');
@@ -136,11 +136,11 @@ export default () => executarTeste('fluxo-principal', async (t) => {
   await page.waitForFunction(() => location.pathname === '/login');
   t.esperarErroConsole('401');
   await t.clicar('Gerenciador de Cadastros');
-  await page.type('input[placeholder=master]', 'master');
+  await page.type('input[placeholder=master]', ADMIN.usuario);
   await page.type('.modal input[type=password]', 'errada');
   await t.clicar('Acessar Gerenciador');
   await t.esperarTexto('Usuário ou senha de administrador incorretos.');
-  await t.digitar('.modal input[type=password]', 'master');
+  await t.digitar('.modal input[type=password]', ADMIN.senha);
   await t.clicar('Acessar Gerenciador');
   await t.esperarTexto('Gerenciamento de Usuários');
   await page.type('input[placeholder^="Buscar"]', 'e2e');
