@@ -9,20 +9,26 @@ import lombok.Setter;
 import java.time.LocalDate;
 
 /**
- * Usuário do sistema. O campo {@code perfil} diferencia ATLETA, ORGANIZADOR e HISTORICO
- * (atleta criado automaticamente a partir do histórico importado). A mesma pessoa pode ter
- * um cadastro por perfil, por isso as restrições de unicidade incluem o perfil.
+ * Usuário do sistema. O campo {@code perfil} diferencia:
+ * <ul>
+ *   <li>ATLETA e ORGANIZADOR: contas com login. A mesma pessoa pode ter uma conta de cada perfil,
+ *       por isso as restrições de unicidade incluem o perfil;</li>
+ *   <li>HISTORICO: atleta pendente, criado ao inscrever alguém que só existe no histórico importado.
+ *       Tem só nome, gênero e box; quando a pessoa se cadastra e vincula esse histórico, o registro
+ *       vira a conta dela (ver {@code AtletaController#cadastrarAtleta}).</li>
+ * </ul>
+ * O esquema da tabela é definido pelas migrações do Liquibase.
  */
 @Entity
-@Table(name = "atletas", uniqueConstraints = {
-    @UniqueConstraint(name = "uk_cpf_perfil", columnNames = {"cpf", "perfil"}),
-    @UniqueConstraint(name = "uk_email_perfil", columnNames = {"email", "perfil"}),
-    @UniqueConstraint(name = "uk_celular_perfil", columnNames = {"celular", "perfil"})
-})
+@Table(name = "atletas")
 @Getter
 @Setter
 @NoArgsConstructor
 public class Atleta {
+
+    public static final String PERFIL_ATLETA = "ATLETA";
+    public static final String PERFIL_ORGANIZADOR = "ORGANIZADOR";
+    public static final String PERFIL_HISTORICO = "HISTORICO";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,35 +37,28 @@ public class Atleta {
     @Column(nullable = false)
     private String nomeCompleto;
 
-    @Column(length = 14)
     private String cpf;
 
-    @Column(nullable = false)
     private LocalDate dataNascimento;
 
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false)
     private String genero;
 
-    @Column(nullable = false, length = 15)
     private String celular;
 
-    @Column(nullable = false)
     private String email;
 
-    /** Hash BCrypt da senha. Nunca é enviado nas respostas da API. */
+    /** Hash BCrypt da senha (nulo para atletas pendentes do histórico). Nunca é enviado nas respostas da API. */
     @JsonIgnore
-    @Column(nullable = false)
     private String senha;
 
-    @Column(nullable = false, length = 100)
     private String cidade;
 
-    @Column(nullable = false, length = 2)
     private String estado;
 
-    @Column(nullable = false, length = 100)
+    @Column(nullable = false)
     private String nomeBox;
 
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false)
     private String perfil;
 }

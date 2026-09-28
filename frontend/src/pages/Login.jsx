@@ -3,26 +3,76 @@ import { useNavigate, Link, useLocation } from 'react-router-dom';
 import api, { mensagemDeErro, iniciarSessao } from '../api';
 import { mascaraCpf } from '../utils/formatacao';
 import { corDoPerfil, imagemDoPerfil } from '../tema';
+import Modal from '../components/Modal';
+import Alerta from '../components/Alerta';
 
 const PERFIS = ['ATLETA', 'ORGANIZADOR'];
 
 /** O campo aceita e-mail ou CPF: aplica a máscara de CPF apenas quando só há números. */
 const formatarLogin = (valor) => (valor.includes('@') || /[a-zA-Z]/.test(valor) ? valor : mascaraCpf(valor));
 
+/** Pede o link de redefinição de senha para o e-mail informado. */
+function ModalEsqueciSenha({ perfil, onFechar }) {
+  const [email, setEmail] = useState('');
+  const [mensagem, setMensagem] = useState({ tipo: '', texto: '' });
+  const [enviando, setEnviando] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setEnviando(true);
+    try {
+      const { data } = await api.post('/conta/recuperar-senha', { email: email.trim(), perfil });
+      setMensagem({ tipo: 'sucesso', texto: data });
+    } catch (err) {
+      setMensagem({ tipo: 'erro', texto: mensagemDeErro(err, 'Não foi possível pedir a redefinição agora.') });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <Modal titulo="Esqueci minha senha" corTitulo={corDoPerfil(perfil)} onFechar={onFechar} bloqueado={enviando}>
+      <p style={{ color: '#a0aec0', fontSize: '0.84rem', lineHeight: '1.4', marginBottom: '14px' }}>
+        Informe o e-mail da sua conta de <strong>{perfil === 'ORGANIZADOR' ? 'Organizador' : 'Atleta'}</strong>.
+        Enviaremos um link para você criar uma nova senha.
+      </p>
+      <Alerta tipo={mensagem.tipo}>{mensagem.texto}</Alerta>
+      {mensagem.tipo !== 'sucesso' && (
+        <form onSubmit={handleSubmit}>
+          <label className="campo">
+            <span className="campo-rotulo">E-mail</span>
+            <input type="email" className="campo-entrada" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </label>
+          <div className="modal-acoes">
+            <button type="button" className="botao botao-secundario" onClick={onFechar}>Cancelar</button>
+            <button type="submit" className="botao botao-verde" disabled={enviando}>
+              {enviando ? 'Enviando...' : 'Enviar link'}
+            </button>
+          </div>
+        </form>
+      )}
+      {mensagem.tipo === 'sucesso' && (
+        <div className="modal-acoes">
+          <button type="button" className="botao botao-verde" onClick={onFechar}>Entendi</button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Quando chega aqui vindo de um cadastro concluído, mostra a mensagem e já seleciona o perfil cadastrado
-  const vindoDoCadastro = location.state?.cadastroSucesso ? location.state : null;
+  // Quando chega aqui vindo de um cadastro concluído (ou de uma redefinição de senha), mostra a mensagem
+  const vindoDeOutraTela = location.state?.mensagem ? location.state : null;
 
-  const [tipoUsuario, setTipoUsuario] = useState(vindoDoCadastro?.tipoCadastrado || 'ATLETA');
+  const [tipoUsuario, setTipoUsuario] = useState(vindoDeOutraTela?.tipoCadastrado || 'ATLETA');
   const [formData, setFormData] = useState({ login: '', senha: '' });
   const [mensagemErro, setMensagemErro] = useState('');
-  const [mensagemSucesso, setMensagemSucesso] = useState(
-    vindoDoCadastro ? vindoDoCadastro.mensagem || 'Cadastro realizado com sucesso! Faça login para continuar.' : ''
-  );
+  const [mensagemSucesso, setMensagemSucesso] = useState(vindoDeOutraTela?.mensagem || '');
   const [carregando, setCarregando] = useState(false);
+  const [modalEsqueciAberto, setModalEsqueciAberto] = useState(false);
 
   // Modal de acesso do administrador master
   const [modalAdminAberto, setModalAdminAberto] = useState(false);
@@ -31,9 +81,9 @@ export default function Login() {
   const [adminErro, setAdminErro] = useState('');
   const [carregandoAdmin, setCarregandoAdmin] = useState(false);
 
-  // Limpa o state da navegação para a mensagem de cadastro não reaparecer ao recarregar a página
+  // Limpa o state da navegação para a mensagem não reaparecer ao recarregar a página
   useEffect(() => {
-    if (location.state?.cadastroSucesso) {
+    if (location.state?.mensagem) {
       window.history.replaceState({}, document.title);
     }
   }, [location]);
@@ -102,11 +152,11 @@ export default function Login() {
   };
 
   return (
-    <div style={styles.pageWrapper}>
-      <div style={styles.cardContainer}>
+    <div className="tela-acesso">
+      <div className="cartao-acesso" style={styles.cardContainer}>
 
-        {/* Banner lateral */}
-        <div style={{ ...styles.imageBanner, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
+        {/* Banner lateral (some em telas pequenas) */}
+        <div className="cartao-acesso-banner" style={{ flex: 1, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
           <div style={styles.overlay}>
             <h2 style={{ ...styles.bannerTitle, color: accentColor }}>FAIRPLAY</h2>
             <p style={styles.bannerText}>
@@ -118,7 +168,7 @@ export default function Login() {
         </div>
 
         {/* Formulário de login */}
-        <div style={styles.formSection}>
+        <div className="cartao-acesso-formulario" style={styles.formSection}>
           <div style={styles.tabContainer}>
             {PERFIS.map((perfil) => {
               const ativo = tipoUsuario === perfil;
@@ -157,31 +207,40 @@ export default function Login() {
           {mensagemErro && <div style={styles.alertErro}>{mensagemErro}</div>}
 
           <form onSubmit={handleSubmit} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>E-mail ou CPF</label>
+            <label className="campo">
+              <span className="campo-rotulo">E-mail ou CPF</span>
               <input
                 type="text"
                 name="login"
+                className="campo-entrada"
                 placeholder="exemplo@email.com ou CPF"
                 value={formData.login}
                 onChange={handleChange}
                 required
-                style={styles.input}
               />
-            </div>
+            </label>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Senha</label>
+            <label className="campo">
+              <span className="campo-rotulo">Senha</span>
               <input
                 type="password"
                 name="senha"
+                className="campo-entrada"
                 placeholder="••••••••"
                 value={formData.senha}
                 onChange={handleChange}
                 required
-                style={styles.input}
               />
-            </div>
+            </label>
+
+            <button
+              type="button"
+              className="link-botao"
+              onClick={() => setModalEsqueciAberto(true)}
+              style={{ color: '#8b949e', fontSize: '0.8rem', alignSelf: 'flex-end', fontWeight: 600 }}
+            >
+              Esqueci minha senha
+            </button>
 
             <button
               type="submit"
@@ -210,101 +269,48 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Modal de autenticação master */}
+      {modalEsqueciAberto && <ModalEsqueciSenha perfil={tipoUsuario} onFechar={() => setModalEsqueciAberto(false)} />}
+
       {modalAdminAberto && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#00ff88', margin: 0, fontSize: '1.2rem' }}>Acesso Master</h3>
-              <button type="button" onClick={() => setModalAdminAberto(false)} style={styles.btnFecharModal}>
-                ✕
+        <Modal titulo="Acesso Master" corTitulo="#00ff88" largura={380} onFechar={() => setModalAdminAberto(false)}>
+          <p style={{ color: '#a0aec0', fontSize: '0.84rem', marginBottom: '16px', lineHeight: '1.4' }}>
+            Informe suas credenciais de administrador para acessar a gestão de cadastros.
+          </p>
+
+          <Alerta tipo="erro">{adminErro}</Alerta>
+
+          <form onSubmit={handleLoginMaster} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <label className="campo">
+              <span className="campo-rotulo">Usuário Master</span>
+              <input type="text" className="campo-entrada" placeholder="master" value={adminUser}
+                onChange={(e) => setAdminUser(e.target.value)} required />
+            </label>
+
+            <label className="campo">
+              <span className="campo-rotulo">Senha Master</span>
+              <input type="password" className="campo-entrada" placeholder="••••••" value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)} required />
+            </label>
+
+            <div className="modal-acoes">
+              <button type="button" className="botao botao-secundario" onClick={() => setModalAdminAberto(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className="botao botao-verde" disabled={carregandoAdmin}>
+                {carregandoAdmin ? 'Verificando...' : 'Acessar Gerenciador'}
               </button>
             </div>
-
-            <p style={{ color: '#a0aec0', fontSize: '0.84rem', margin: '8px 0 16px 0', lineHeight: '1.4' }}>
-              Informe suas credenciais de administrador para acessar a gestão de cadastros.
-            </p>
-
-            {adminErro && <div style={styles.modalAlert}>{adminErro}</div>}
-
-            <form onSubmit={handleLoginMaster} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Usuário Master</label>
-                <input
-                  type="text"
-                  placeholder="master"
-                  value={adminUser}
-                  onChange={(e) => setAdminUser(e.target.value)}
-                  required
-                  style={styles.input}
-                />
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Senha Master</label>
-                <input
-                  type="password"
-                  placeholder="••••••"
-                  value={adminPass}
-                  onChange={(e) => setAdminPass(e.target.value)}
-                  required
-                  style={styles.input}
-                />
-              </div>
-
-              <div style={styles.modalActions}>
-                <button type="button" onClick={() => setModalAdminAberto(false)} style={styles.btnModalCancelar}>
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={carregandoAdmin}
-                  style={{
-                    ...styles.btnModalConfirmar,
-                    opacity: carregandoAdmin ? 0.6 : 1,
-                    cursor: carregandoAdmin ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {carregandoAdmin ? 'Verificando...' : 'Acessar Gerenciador'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
 }
 
 const styles = {
-  pageWrapper: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '100vh',
-    width: '100%',
-    padding: '24px 16px',
-  },
   cardContainer: {
-    display: 'flex',
-    width: '100%',
     maxWidth: '920px',
-    height: '630px',
-    backgroundColor: '#111418',
-    borderRadius: '16px',
-    overflow: 'hidden',
-    border: '1px solid #22272e',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-  },
-  imageBanner: {
-    flex: '1',
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'flex-end',
-    height: '100%',
-    transition: 'background-image 0.3s ease-in-out',
+    height: '660px',
   },
   overlay: {
     padding: '40px 32px',
@@ -326,8 +332,6 @@ const styles = {
   formSection: {
     flex: '1.1',
     padding: '36px 40px',
-    display: 'flex',
-    flexDirection: 'column',
     justifyContent: 'center',
   },
   tabContainer: {
@@ -365,29 +369,7 @@ const styles = {
     flexDirection: 'column',
     gap: '14px',
   },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '5px',
-  },
-  label: {
-    fontSize: '0.72rem',
-    color: '#a0aec0',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  input: {
-    padding: '11px 13px',
-    borderRadius: '8px',
-    backgroundColor: '#0a0c0e',
-    border: '1px solid #2d3748',
-    color: '#ffffff',
-    fontSize: '0.9rem',
-    outline: 'none',
-  },
   button: {
-    marginTop: '4px',
     padding: '13px',
     borderRadius: '8px',
     border: 'none',
@@ -440,74 +422,4 @@ const styles = {
     fontWeight: '600',
     transition: 'all 0.2s',
   },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-    padding: '16px',
-  },
-  modalContent: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '12px',
-    padding: '24px',
-    maxWidth: '380px',
-    width: '100%',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.9)',
-  },
-  modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  btnFecharModal: {
-    background: 'transparent',
-    border: 'none',
-    color: '#8b949e',
-    fontSize: '1.1rem',
-    cursor: 'pointer',
-  },
-  modalAlert: {
-    backgroundColor: 'rgba(255, 68, 68, 0.1)',
-    color: '#ff4444',
-    border: '1px solid #ff4444',
-    padding: '8px',
-    borderRadius: '6px',
-    fontSize: '0.78rem',
-    marginBottom: '10px',
-    textAlign: 'center',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '10px',
-    marginTop: '8px',
-  },
-  btnModalCancelar: {
-    backgroundColor: 'transparent',
-    border: '1px solid #30363d',
-    color: '#c9d1d9',
-    padding: '8px 14px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '0.82rem',
-    fontWeight: '600',
-  },
-  btnModalConfirmar: {
-    backgroundColor: '#238636',
-    border: 'none',
-    color: '#ffffff',
-    padding: '8px 14px',
-    borderRadius: '6px',
-    fontWeight: '700',
-    fontSize: '0.82rem',
-    letterSpacing: '0.5px',
-  }
 };

@@ -5,6 +5,9 @@ import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
+import br.com.uff.fairplay.dto.InscricaoLoteDTO;
+import br.com.uff.fairplay.dto.LancarResultadosDTO;
+import br.com.uff.fairplay.dto.ResultadoInscricaoLoteDTO;
 import br.com.uff.fairplay.model.CategoriaEvento;
 import br.com.uff.fairplay.model.Evento;
 import br.com.uff.fairplay.model.InscricaoEvento;
@@ -78,6 +81,22 @@ public class EventoController {
     public ResponseEntity<InscricaoEvento> inscreverAtleta(@RequestBody InscreverAtletaDTO dto,
                                                            @AuthenticationPrincipal UsuarioLogado organizador) {
         return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.inscreverAtleta(dto, organizador.id()));
+    }
+
+    /** Inscreve de uma vez os atletas dos CPFs lidos de uma planilha; devolve inscritos e falhas. */
+    @PostMapping("/categorias/{categoriaId}/inscricoes/lote")
+    public ResponseEntity<ResultadoInscricaoLoteDTO> inscreverEmLote(@PathVariable Long categoriaId,
+                                                                     @RequestBody InscricaoLoteDTO dto,
+                                                                     @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.inscreverEmLote(categoriaId, dto.cpfs(), organizador.id()));
+    }
+
+    /** Grava as colocações finais da categoria (resultado do evento). */
+    @PutMapping("/categorias/{categoriaId}/resultados")
+    public ResponseEntity<List<InscricaoEvento>> lancarResultados(@PathVariable Long categoriaId,
+                                                                  @RequestBody LancarResultadosDTO dto,
+                                                                  @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.lancarResultados(categoriaId, dto, organizador.id()));
     }
 
     @GetMapping("/categorias/{categoriaId}/inscricoes")

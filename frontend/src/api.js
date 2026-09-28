@@ -3,9 +3,12 @@ import axios from 'axios';
 /** Rotas que respondem 401 por credencial errada (não por sessão expirada). */
 const ROTAS_DE_LOGIN = ['/atletas/login', '/admin/usuarios/login'];
 
-/** Cliente HTTP do backend. Todas as páginas usam caminhos relativos a /api. */
+/**
+ * Cliente HTTP do backend. Todas as páginas usam caminhos relativos a /api.
+ * O endereço vem da variável VITE_API_URL (arquivo .env); sem ela, usa o backend local.
+ */
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
 });
 
 // Envia o token da sessão em todas as requisições

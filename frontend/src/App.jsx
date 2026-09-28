@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import CadastroAtleta from './pages/CadastroAtleta';
+import RedefinirSenha from './pages/RedefinirSenha';
 import DashboardAtleta from './pages/DashboardAtleta';
 import DashboardOrganizador from './pages/DashboardOrganizador';
 import AdminUsuarios from './pages/AdminUsuarios';
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/login" />} />
         <Route path="/login" element={<Login />} />
         <Route path="/cadastro" element={<CadastroAtleta />} />
+        <Route path="/redefinir-senha" element={<RedefinirSenha />} />
         <Route
           path="/atleta/home"
           element={<RotaProtegida perfil="ATLETA"><DashboardAtleta /></RotaProtegida>}

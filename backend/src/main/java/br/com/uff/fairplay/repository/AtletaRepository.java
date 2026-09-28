@@ -15,8 +15,31 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
     boolean existsByEmailAndPerfil(String email, String perfil);
     boolean existsByCelularAndPerfil(String celular, String perfil);
 
-    Optional<Atleta> findByEmailAndPerfil(String email, String perfil);
+    Optional<Atleta> findByEmailIgnoreCaseAndPerfil(String email, String perfil);
     Optional<Atleta> findByCpfAndPerfil(String cpf, String perfil);
+
+    /**
+     * Atleta pendente (perfil HISTORICO) já criado para os registros do histórico com este nome —
+     * é o registro que vira a conta da pessoa quando ela se cadastra e vincula esse histórico.
+     */
+    @Query(value = """
+        SELECT a.* FROM fairplay_tcc.atletas a
+        WHERE a.perfil = 'HISTORICO'
+          AND EXISTS (
+              SELECT 1 FROM fairplay_tcc.historico_atletas h
+              WHERE h.atleta_id = a.id AND LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(:nome))
+          )
+        LIMIT 1
+    """, nativeQuery = true)
+    Optional<Atleta> buscarPendenteDoHistorico(@Param("nome") String nome);
+
+    /** Atletas (perfil ATLETA) cujo CPF, sem pontuação, está na lista informada (só dígitos). */
+    @Query(value = """
+        SELECT * FROM fairplay_tcc.atletas a
+        WHERE a.perfil = 'ATLETA'
+          AND REPLACE(REPLACE(a.cpf, '.', ''), '-', '') IN (:cpfsDigitos)
+    """, nativeQuery = true)
+    List<Atleta> buscarAtletasPorCpfs(@Param("cpfsDigitos") List<String> cpfsDigitos);
 
     /**
      * Busca unificada para inscrição em eventos:
@@ -25,7 +48,7 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
      *       ou vazio se o termo não parecer um CPF) permite achar o CPF digitado sem pontuação;</li>
      *   <li>atletas do histórico importado que ainda não têm cadastro, agrupados por nome.
      *       Esses recebem id = menor id do histórico + 100000 (ver {@code EventoService#DESLOCAMENTO_ID_HISTORICO})
-     *       e perfil 'HISTORICO'.</li>
+     *       e perfil 'HISTORICO'. Gênero, cidade e UF vêm nulos, pois o histórico não tem esses dados.</li>
      * </ol>
      */
     @Query(value = """
@@ -52,9 +75,9 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
             (MIN(h.id) + 100000) AS id,
             h.nome_atleta AS nomeCompleto,
             NULL AS cpf,
-            'MASCULINO' AS genero,
-            'Niterói' AS cidade,
-            'RJ' AS estado,
+            NULL AS genero,
+            NULL AS cidade,
+            NULL AS estado,
             GROUP_CONCAT(DISTINCT COALESCE(h.box_origem, 'Sem Box') SEPARATOR ' / ') AS nomeBox,
             'HISTORICO' AS perfil,
             COUNT(h.id) AS totalHistoricos

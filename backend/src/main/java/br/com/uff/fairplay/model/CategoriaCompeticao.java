@@ -1,5 +1,9 @@
 package br.com.uff.fairplay.model;
 
+/**
+ * Níveis de competição. A escada de promoção é Iniciante → Scale → Intermediário → RX → Elite.
+ * Elite é o topo (campeão Elite continua Elite) e Master é uma categoria à parte, sem promoção.
+ */
 public enum CategoriaCompeticao {
     INICIANTE("Iniciante", 0),
     SCALE("Scale", 1),
@@ -34,14 +38,28 @@ public enum CategoriaCompeticao {
         return null;
     }
 
+    /** Categoria para a qual o atleta é promovido. Elite e Master não sobem: devolvem a própria categoria. */
     public CategoriaCompeticao getProxima() {
-        // Elite e Master não possuem próxima categoria automática
         return switch (this) {
             case INICIANTE -> SCALE;
             case SCALE -> INTERMEDIARIO;
             case INTERMEDIARIO -> RX;
             case RX -> ELITE;
-            default -> this;
+            case ELITE, MASTER -> this;
         };
+    }
+
+    /** Se existe categoria acima desta na escada de promoção. */
+    public boolean temProxima() {
+        return getProxima() != this;
+    }
+
+    /**
+     * Se esta categoria é igual ou está acima de {@code outra} na escada de promoção.
+     * Master fica fora da escada: não está acima de nenhuma outra categoria.
+     */
+    public boolean igualOuAcimaDe(CategoriaCompeticao outra) {
+        if (this == outra) return true;
+        return this != MASTER && outra != MASTER && this.ordinal() > outra.ordinal();
     }
 }

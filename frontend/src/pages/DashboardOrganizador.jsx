@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { mensagemDeErro, encerrarSessao } from '../api';
 import { mascaraData, dataBrParaIso, dataIsoParaBr, formatarCpf } from '../utils/formatacao';
-import { estiloFeedback } from '../tema';
+import { baixarPlanilha } from '../utils/exportacao';
+import Modal from '../components/Modal';
+import Alerta from '../components/Alerta';
+import ModalConfirmacao from '../components/ModalConfirmacao';
+import ModalTrocarSenha from '../components/ModalTrocarSenha';
+import ImportacaoCpfs from '../components/ImportacaoCpfs';
 
 const FORMATOS = ['Individual', 'Dupla', 'Trio', 'Time'];
 const GENEROS = ['Masculino', 'Feminino', 'Misto'];
@@ -42,34 +47,11 @@ function escolherAtleta(lista, termo) {
   return lista[0];
 }
 
+/** "Cidade/UF" ou vazio (atletas do histórico não têm cidade). */
+const cidadeUf = (pessoa) => (pessoa?.cidade ? `${pessoa.cidade}/${pessoa.estado}` : '');
+
 function Opcoes({ valores }) {
   return valores.map((valor) => <option key={valor} value={valor}>{valor}</option>);
-}
-
-function ModalConfirmacao({ titulo, children, textoConfirmar, textoProcessando, processando, onConfirmar, onCancelar }) {
-  return (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modalContentSmall}>
-        <div style={styles.modalHeader}>
-          <h3 style={{ color: '#ff4444', margin: 0, fontSize: '1.15rem' }}>{titulo}</h3>
-          <button type="button" onClick={onCancelar} style={styles.btnFecharModal}>✕</button>
-        </div>
-
-        <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5', margin: '14px 0 20px 0' }}>
-          {children}
-        </p>
-
-        <div style={styles.modalActions}>
-          <button type="button" onClick={onCancelar} style={styles.btnCancelar}>
-            Cancelar
-          </button>
-          <button type="button" disabled={processando} onClick={onConfirmar} style={styles.btnConfirmarExclusao}>
-            {processando ? textoProcessando : textoConfirmar}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function DashboardOrganizador() {
@@ -89,15 +71,21 @@ export default function DashboardOrganizador() {
   const [novoEvento, setNovoEvento] = useState(EVENTO_VAZIO);
   const [novaCatCriacao, setNovaCatCriacao] = useState(CATEGORIA_PADRAO);
 
-  // Nova categoria em evento existente
+  // Nova categoria em evento existente, importação por planilha e troca de senha
   const [modalAddCatAberto, setModalAddCatAberto] = useState(false);
   const [novaCatExistente, setNovaCatExistente] = useState(CATEGORIA_PADRAO);
+  const [modalImportarAberto, setModalImportarAberto] = useState(false);
+  const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
 
   // Busca e inscrição de atletas
   const [termoBuscaAtleta, setTermoBuscaAtleta] = useState('');
   const [sugestoesAtletas, setSugestoesAtletas] = useState([]);
   const [feedbackInscricao, setFeedbackInscricao] = useState(SEM_FEEDBACK);
   const [inscrevendo, setInscrevendo] = useState(false);
+
+  // Resultados: colocações digitadas e ainda não salvas, por id da inscrição
+  const [colocacoesEditadas, setColocacoesEditadas] = useState({});
+  const [salvandoResultados, setSalvandoResultados] = useState(false);
 
   // Confirmações de exclusão: o modal fica aberto enquanto o item estiver definido
   const [eventoParaExcluir, setEventoParaExcluir] = useState(null);
@@ -118,6 +106,7 @@ export default function DashboardOrganizador() {
     setCategoriaSelecionada(categoria);
     setTermoBuscaAtleta('');
     setSugestoesAtletas([]);
+    setColocacoesEditadas({});
     try {
       const { data } = await api.get(`/eventos/categorias/${categoria.id}/inscricoes`);
       setInscritos(data || []);
@@ -177,16 +166,20 @@ export default function DashboardOrganizador() {
 
   // ---------------------------------------------------------------- Inscrições
 
-  /** Motivo pelo qual o atleta não pode ser inscrito na categoria selecionada, ou null se puder. */
+  /**
+   * Motivo pelo qual o atleta não pode ser inscrito na categoria selecionada, ou null se puder.
+   * Mesma regra do backend: só bloqueia masculino em categoria feminina e vice-versa
+   * (gênero "Outro" e atletas do histórico, sem gênero conhecido, são aceitos).
+   */
   const verificarImpedimento = (atleta) => {
     const generoCategoria = (categoriaSelecionada.genero || '').toUpperCase();
     const generoAtleta = (atleta.genero || '').toUpperCase();
 
     if (!generoCategoria.includes('MIST')) {
-      if (generoCategoria.includes('MASC') && !generoAtleta.startsWith('M')) {
+      if (generoCategoria.includes('MASC') && generoAtleta.startsWith('F')) {
         return { tipo: 'erro', texto: `O atleta ${atleta.nomeCompleto} (Feminino) não pode ser inscrito em uma categoria masculina.` };
       }
-      if (generoCategoria.includes('FEM') && !generoAtleta.startsWith('F')) {
+      if (generoCategoria.includes('FEM') && generoAtleta.startsWith('M')) {
         return { tipo: 'erro', texto: `O atleta ${atleta.nomeCompleto} (Masculino) não pode ser inscrito em uma categoria feminina.` };
       }
     }
@@ -258,6 +251,16 @@ export default function DashboardOrganizador() {
     }
   };
 
+  /** Acrescenta à tabela os atletas inscritos pela importação de planilha. */
+  const handleInscritosPorPlanilha = (novos) => {
+    if (novos.length === 0) return;
+    setInscritos((prev) => [...novos, ...prev]);
+    setFeedbackInscricao({
+      tipo: 'sucesso',
+      texto: `${novos.length} ${novos.length === 1 ? 'atleta inscrito' : 'atletas inscritos'} pela planilha.`
+    });
+  };
+
   const confirmarExclusaoInscricao = async () => {
     setProcessandoAcao(true);
     try {
@@ -270,6 +273,59 @@ export default function DashboardOrganizador() {
     } finally {
       setProcessandoAcao(false);
     }
+  };
+
+  // ---------------------------------------------------------------- Resultados e exportação
+
+  const colocacaoExibida = (ins) => colocacoesEditadas[ins.id] ?? (ins.colocacao ?? '');
+  const haResultadosNaoSalvos = Object.keys(colocacoesEditadas).length > 0;
+
+  const handleColocacao = (inscricaoId, valor) => {
+    setColocacoesEditadas((prev) => ({ ...prev, [inscricaoId]: valor.replace(/\D/g, '').slice(0, 4) }));
+  };
+
+  /** Grava as colocações da categoria; elas passam a contar no histórico dos atletas. */
+  const handleSalvarResultados = async () => {
+    const resultados = inscritos.map((ins) => {
+      const valor = String(colocacaoExibida(ins)).trim();
+      return { inscricaoId: ins.id, colocacao: valor === '' ? null : Number(valor) };
+    });
+    if (resultados.some((r) => r.colocacao !== null && r.colocacao < 1)) {
+      setFeedbackInscricao({ tipo: 'erro', texto: 'A colocação deve ser um número a partir de 1.' });
+      return;
+    }
+
+    setSalvandoResultados(true);
+    try {
+      const { data } = await api.put(`/eventos/categorias/${categoriaSelecionada.id}/resultados`, { resultados });
+      const atualizadas = new Map(data.map((ins) => [ins.id, ins]));
+      setInscritos((prev) => prev.map((ins) => atualizadas.get(ins.id) || ins));
+      setColocacoesEditadas({});
+      setFeedbackInscricao({ tipo: 'sucesso', texto: 'Resultados salvos. Eles já contam no histórico dos atletas.' });
+    } catch (err) {
+      setFeedbackInscricao({ tipo: 'erro', texto: mensagemDeErro(err, 'Erro ao salvar os resultados.') });
+    } finally {
+      setSalvandoResultados(false);
+    }
+  };
+
+  const handleExportar = () => {
+    const linhas = inscritos.map((ins) => ({
+      Atleta: ins.atleta?.nomeCompleto || '',
+      CPF: ins.atleta?.cpf || '',
+      'Box / CT': ins.atleta?.nomeBox || '',
+      'Cidade/UF': cidadeUf(ins.atleta),
+      'Status da auditoria': ins.statusElegibilidade === 'REGULAR' ? 'Regular' : 'Irregular',
+      'Categoria recomendada': ins.categoriaRecomendada || '',
+      Diagnóstico: ins.motivoIrregularidade || '',
+      Colocação: ins.colocacao ?? '',
+    }));
+    baixarPlanilha(
+      `${eventoSelecionado.nome} - ${categoriaSelecionada.formato} ${categoriaSelecionada.genero} ${categoriaSelecionada.nivel}`,
+      'Inscritos',
+      linhas,
+      [30, 16, 24, 18, 18, 20, 60, 10]
+    );
   };
 
   // ---------------------------------------------------------------- Regras e categorias do evento
@@ -380,6 +436,7 @@ export default function DashboardOrganizador() {
     setErroModalEvento('');
 
     const dataInicio = dataBrParaIso(novoEvento.dataInicio);
+    const dataFim = novoEvento.dataFim ? dataBrParaIso(novoEvento.dataFim) : null;
 
     if (novoEvento.nome.trim().length < 3) {
       setErroModalEvento('Informe um nome com pelo menos 3 letras para o evento.');
@@ -387,6 +444,10 @@ export default function DashboardOrganizador() {
     }
     if (!dataInicio) {
       setErroModalEvento('Informe a data de início no formato DD/MM/AAAA.');
+      return;
+    }
+    if (novoEvento.dataFim && !dataFim) {
+      setErroModalEvento('Informe a data de término no formato DD/MM/AAAA ou deixe em branco.');
       return;
     }
     if (novoEvento.categorias.length === 0) {
@@ -397,17 +458,13 @@ export default function DashboardOrganizador() {
     setSalvando(true);
 
     try {
-      const { data } = await api.post('/eventos', {
-        ...novoEvento,
-        dataInicio,
-        dataFim: novoEvento.dataFim ? dataBrParaIso(novoEvento.dataFim) : null
-      });
+      const { data } = await api.post('/eventos', { ...novoEvento, dataInicio, dataFim });
       setEventos((prev) => [data, ...prev]);
       selecionarEvento(data);
       fecharModalCriar();
       setNovoEvento(EVENTO_VAZIO);
-    } catch {
-      setErroModalEvento('Erro ao criar torneio no servidor.');
+    } catch (err) {
+      setErroModalEvento(mensagemDeErro(err, 'Erro ao criar torneio no servidor.'));
     } finally {
       setSalvando(false);
     }
@@ -420,24 +477,22 @@ export default function DashboardOrganizador() {
 
   return (
     <div style={styles.container}>
-      {/* Barra superior */}
-      <header style={styles.navbar}>
+      <header className="barra-topo">
         <div style={styles.navLeft}>
           <span style={styles.brand}>FairPlay</span>
           <span style={styles.roleBadge}>Organizador</span>
         </div>
-        <div style={styles.navRight}>
+        <div className="barra-topo-acoes">
           <span style={{ color: '#a0aec0', fontSize: '0.85rem' }}>Olá, <strong>{organizadorNome}</strong></span>
-          <button onClick={abrirModalCriar} style={styles.btnNovoEvento}>
-            + Criar novo evento
-          </button>
-          <button onClick={handleLogout} style={styles.btnLogout}>Sair</button>
+          <button onClick={abrirModalCriar} className="botao botao-azul">+ Criar novo evento</button>
+          <button onClick={() => setModalSenhaAberto(true)} className="botao botao-secundario">🔑 Trocar senha</button>
+          <button onClick={handleLogout} className="botao botao-secundario">Sair</button>
         </div>
       </header>
 
-      <div style={styles.contentLayout}>
-        {/* Barra lateral: lista de eventos */}
-        <aside style={styles.sidebarEventos}>
+      <div className="painel-organizador">
+        {/* Lista de eventos */}
+        <aside className="painel-organizador-lateral" style={styles.sidebarEventos}>
           <div style={styles.sidebarHeader}>
             <h3 style={styles.sidebarTitle}>Meus torneios</h3>
             <span style={styles.badgeContador}>{eventos.length}</span>
@@ -489,7 +544,7 @@ export default function DashboardOrganizador() {
         </aside>
 
         {/* Gestão do evento selecionado */}
-        <main style={styles.mainGestao}>
+        <main className="painel-organizador-conteudo">
           {eventoSelecionado ? (
             <>
               <div style={styles.eventoHeader}>
@@ -520,7 +575,7 @@ export default function DashboardOrganizador() {
 
               {/* Categorias do evento */}
               <div style={styles.categoriasNavContainer}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '10px' }}>
                   <span style={styles.categoriasNavLabel}>Categorias do evento:</span>
                   <button type="button" onClick={() => setModalAddCatAberto(true)} style={styles.btnAdicionarCategoria}>
                     + Adicionar categoria
@@ -570,19 +625,19 @@ export default function DashboardOrganizador() {
               {/* Inscrições da categoria selecionada */}
               {categoriaSelecionada && (
                 <div style={styles.gestaoInscricoesCard}>
-                  <div style={styles.inscricaoHeader}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#ffffff' }}>
-                        Inscrições: <span style={{ color: '#00bfff' }}>{categoriaSelecionada.formato} {categoriaSelecionada.genero} ({categoriaSelecionada.nivel})</span>
-                      </h3>
-                      <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#718096' }}>
-                        Digite pelo menos 3 caracteres do nome ou CPF do atleta para buscar e pressione <strong>Enter</strong> ou clique para inscrever.
-                      </p>
-                    </div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#ffffff' }}>
+                      Inscrições: <span style={{ color: '#00bfff' }}>{categoriaSelecionada.formato} {categoriaSelecionada.genero} ({categoriaSelecionada.nivel})</span>
+                    </h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#718096' }}>
+                      Digite pelo menos 3 caracteres do nome ou CPF do atleta para buscar e pressione <strong>Enter</strong> ou clique para inscrever.
+                      Para inscrever vários de uma vez, importe uma planilha com a coluna <strong>CPF</strong>.
+                      Depois do evento, preencha a <strong>colocação</strong> de cada atleta e salve os resultados.
+                    </p>
                   </div>
 
-                  <div style={styles.formInserirAtleta}>
-                    <div style={{ position: 'relative', width: '100%' }}>
+                  <div className="linha-ferramentas" style={{ marginBottom: '18px' }}>
+                    <div style={{ position: 'relative', flex: '1 1 280px' }}>
                       <input
                         type="text"
                         placeholder="Digite pelo menos 3 letras ou o CPF do atleta para buscar..."
@@ -608,7 +663,10 @@ export default function DashboardOrganizador() {
                                     📊 {a.totalHistoricos || 0} histórico(s)
                                   </span>
                                 </span>
-                                <span style={styles.dropdownBox}>Box: {a.nomeBox || 'Sem Box'} • {a.cidade}/{a.estado}</span>
+                                <span style={styles.dropdownBox}>
+                                  Box: {a.nomeBox || 'Sem Box'}{cidadeUf(a) ? ` • ${cidadeUf(a)}` : ''}
+                                  {a.perfil === 'HISTORICO' && ' • só no histórico (sem cadastro)'}
+                                </span>
                               </div>
                               <span style={styles.badgeInscreverDireto}>+ Inscrever</span>
                             </div>
@@ -616,15 +674,17 @@ export default function DashboardOrganizador() {
                         </div>
                       )}
                     </div>
+                    <button type="button" onClick={() => setModalImportarAberto(true)} className="botao botao-contorno-azul">
+                      📄 Importar planilha
+                    </button>
+                    <button type="button" onClick={handleExportar} disabled={inscritos.length === 0} className="botao botao-secundario">
+                      ⬇ Exportar Excel
+                    </button>
                   </div>
 
-                  {feedbackInscricao.texto && (
-                    <div style={{ ...styles.feedbackBox, ...estiloFeedback(feedbackInscricao.tipo) }}>
-                      {feedbackInscricao.texto}
-                    </div>
-                  )}
+                  <Alerta tipo={feedbackInscricao.tipo} style={{ marginBottom: '16px' }}>{feedbackInscricao.texto}</Alerta>
 
-                  <div style={styles.tabelaWrapper}>
+                  <div className="tabela-rolavel">
                     <table style={styles.tabela}>
                       <thead>
                         <tr style={styles.thRow}>
@@ -633,13 +693,14 @@ export default function DashboardOrganizador() {
                           <th style={styles.th}>Categoria recomendada</th>
                           <th style={styles.th}>Status da auditoria</th>
                           <th style={styles.th}>Diagnóstico</th>
+                          <th style={styles.th}>Colocação</th>
                           <th style={{ ...styles.th, textAlign: 'center' }}>Ação</th>
                         </tr>
                       </thead>
                       <tbody>
                         {inscritos.length === 0 ? (
                           <tr>
-                            <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#718096', fontSize: '0.9rem' }}>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '36px', color: '#718096', fontSize: '0.9rem' }}>
                               Nenhum atleta inscrito nesta categoria até o momento.
                             </td>
                           </tr>
@@ -655,7 +716,7 @@ export default function DashboardOrganizador() {
                                 </td>
                                 <td style={styles.td}>
                                   {ins.atleta?.nomeBox || 'N/D'}{' '}
-                                  <small style={{ color: '#718096' }}>({ins.atleta?.cidade}/{ins.atleta?.estado})</small>
+                                  {cidadeUf(ins.atleta) && <small style={{ color: '#718096' }}>({cidadeUf(ins.atleta)})</small>}
                                 </td>
                                 <td style={styles.td}>
                                   <span style={styles.badgeCategoriaRec}>⭐ {categoriaRecomendada}</span>
@@ -673,6 +734,17 @@ export default function DashboardOrganizador() {
                                 <td style={{ ...styles.td, fontSize: '0.82rem', color: isRegular ? '#a0aec0' : '#ffa500' }}>
                                   {ins.motivoIrregularidade || 'Cumpre todos os requisitos do regulamento.'}
                                 </td>
+                                <td style={styles.td}>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    aria-label={`Colocação de ${ins.atleta?.nomeCompleto}`}
+                                    placeholder="—"
+                                    value={colocacaoExibida(ins)}
+                                    onChange={(e) => handleColocacao(ins.id, e.target.value)}
+                                    style={styles.inputColocacao}
+                                  />
+                                </td>
                                 <td style={{ ...styles.td, textAlign: 'center' }}>
                                   <button
                                     onClick={() => setInscricaoParaExcluir(ins)}
@@ -689,6 +761,20 @@ export default function DashboardOrganizador() {
                       </tbody>
                     </table>
                   </div>
+
+                  {inscritos.length > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
+                      {haResultadosNaoSalvos && <span style={{ color: '#ffd700', fontSize: '0.8rem' }}>Há colocações não salvas.</span>}
+                      <button
+                        type="button"
+                        onClick={handleSalvarResultados}
+                        disabled={!haResultadosNaoSalvos || salvandoResultados}
+                        className="botao botao-verde"
+                      >
+                        {salvandoResultados ? 'Salvando...' : '🏆 Salvar resultados'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -741,200 +827,190 @@ export default function DashboardOrganizador() {
         </ModalConfirmacao>
       )}
 
-      {/* Modal: adicionar categoria a evento existente */}
+      {modalImportarAberto && categoriaSelecionada && (
+        <ImportacaoCpfs
+          categoria={categoriaSelecionada}
+          onInscritos={handleInscritosPorPlanilha}
+          onFechar={() => setModalImportarAberto(false)}
+        />
+      )}
+
+      {modalSenhaAberto && <ModalTrocarSenha onFechar={() => setModalSenhaAberto(false)} />}
+
       {modalAddCatAberto && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContentSmall}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#00bfff', margin: 0, fontSize: '1.2rem' }}>Adicionar categoria ao torneio</h3>
-              <button type="button" onClick={() => setModalAddCatAberto(false)} style={styles.btnFecharModal}>✕</button>
+        <Modal titulo="Adicionar categoria ao torneio" onFechar={() => setModalAddCatAberto(false)}>
+          <form onSubmit={handleSalvarNovaCategoriaExistente} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <label className="campo">
+              <span className="campo-rotulo">Formato</span>
+              <select
+                value={novaCatExistente.formato}
+                onChange={(e) => setNovaCatExistente({ ...novaCatExistente, formato: e.target.value })}
+                style={styles.select}
+              >
+                <Opcoes valores={FORMATOS} />
+              </select>
+            </label>
+
+            <label className="campo">
+              <span className="campo-rotulo">Gênero</span>
+              <select
+                value={novaCatExistente.genero}
+                onChange={(e) => setNovaCatExistente({ ...novaCatExistente, genero: e.target.value })}
+                style={styles.select}
+              >
+                <Opcoes valores={GENEROS} />
+              </select>
+            </label>
+
+            <label className="campo">
+              <span className="campo-rotulo">Nível</span>
+              <select
+                value={novaCatExistente.nivel}
+                onChange={(e) => setNovaCatExistente({ ...novaCatExistente, nivel: e.target.value })}
+                style={styles.select}
+              >
+                <Opcoes valores={NIVEIS} />
+              </select>
+            </label>
+
+            <div className="modal-acoes">
+              <button type="button" className="botao botao-secundario" onClick={() => setModalAddCatAberto(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className="botao botao-azul">Adicionar categoria</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {modalCriarAberto && (
+        <Modal titulo="Criar torneio esportivo" largura={560} onFechar={fecharModalCriar} bloqueado={salvando}>
+          <Alerta tipo="erro">{erroModalEvento && `⚠️ ${erroModalEvento}`}</Alerta>
+
+          <form onSubmit={handleSalvarNovoEvento} style={styles.modalForm}>
+            <label className="campo">
+              <span className="campo-rotulo">Nome do evento</span>
+              <input
+                type="text"
+                className="campo-entrada"
+                placeholder="Ex: Torneio CrossFit Rio 2026"
+                value={novoEvento.nome}
+                onChange={(e) => alterarNovoEvento('nome', e.target.value)}
+                required
+              />
+            </label>
+
+            <div className="linha-campos">
+              <label className="campo" style={{ flex: 1 }}>
+                <span className="campo-rotulo">Data de início (DD/MM/AAAA)</span>
+                <input
+                  type="text"
+                  className="campo-entrada"
+                  placeholder="DD/MM/AAAA"
+                  maxLength={10}
+                  value={novoEvento.dataInicio}
+                  onChange={(e) => alterarNovoEvento('dataInicio', mascaraData(e.target.value))}
+                  required
+                />
+              </label>
+              <label className="campo" style={{ flex: 1 }}>
+                <span className="campo-rotulo">Data de término (opcional)</span>
+                <input
+                  type="text"
+                  className="campo-entrada"
+                  placeholder="DD/MM/AAAA"
+                  maxLength={10}
+                  value={novoEvento.dataFim}
+                  onChange={(e) => alterarNovoEvento('dataFim', mascaraData(e.target.value))}
+                />
+              </label>
             </div>
 
-            <form onSubmit={handleSalvarNovaCategoriaExistente} style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '10px' }}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Formato</label>
+            <label className="campo">
+              <span className="campo-rotulo">Localização</span>
+              <input
+                type="text"
+                className="campo-entrada"
+                placeholder="Ex: Ginásio Caio Martins - Niterói, RJ"
+                value={novoEvento.localizacao}
+                onChange={(e) => alterarNovoEvento('localizacao', e.target.value)}
+              />
+            </label>
+
+            <div style={styles.regrasSection}>
+              <span className="campo-rotulo" style={{ color: '#00bfff' }}>Selecione os critérios para subir de categoria:</span>
+              {REGRAS.map(({ campo, rotuloLongo }) => (
+                <label key={campo} style={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={novoEvento[campo]}
+                    onChange={(e) => alterarNovoEvento(campo, e.target.checked)}
+                  />
+                  <span>{rotuloLongo}</span>
+                </label>
+              ))}
+            </div>
+
+            <div style={styles.categoriasBuilder}>
+              <span className="campo-rotulo">Categorias do torneio:</span>
+              <div className="linha-ferramentas">
                 <select
-                  value={novaCatExistente.formato}
-                  onChange={(e) => setNovaCatExistente({ ...novaCatExistente, formato: e.target.value })}
+                  value={novaCatCriacao.formato}
+                  onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, formato: e.target.value })}
                   style={styles.select}
                 >
                   <Opcoes valores={FORMATOS} />
                 </select>
-              </div>
 
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Gênero</label>
                 <select
-                  value={novaCatExistente.genero}
-                  onChange={(e) => setNovaCatExistente({ ...novaCatExistente, genero: e.target.value })}
+                  value={novaCatCriacao.genero}
+                  onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, genero: e.target.value })}
                   style={styles.select}
                 >
                   <Opcoes valores={GENEROS} />
                 </select>
-              </div>
 
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Nível</label>
                 <select
-                  value={novaCatExistente.nivel}
-                  onChange={(e) => setNovaCatExistente({ ...novaCatExistente, nivel: e.target.value })}
+                  value={novaCatCriacao.nivel}
+                  onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, nivel: e.target.value })}
                   style={styles.select}
                 >
                   <Opcoes valores={NIVEIS} />
                 </select>
-              </div>
 
-              <div style={styles.modalActions}>
-                <button type="button" onClick={() => setModalAddCatAberto(false)} style={styles.btnCancelar}>
-                  Cancelar
+                <button
+                  type="button"
+                  onClick={() => alterarNovoEvento('categorias', [...novoEvento.categorias, { ...novaCatCriacao }])}
+                  className="botao botao-verde"
+                >
+                  + Adicionar
                 </button>
-                <button type="submit" style={styles.btnSalvarTorneio}>
-                  Adicionar categoria
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: criação de novo evento */}
-      {modalCriarAberto && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <div style={styles.modalHeader}>
-              <h2 style={{ color: '#00bfff', margin: 0, fontSize: '1.3rem' }}>Criar torneio esportivo</h2>
-              <button type="button" onClick={fecharModalCriar} style={styles.btnFecharModal}>✕</button>
-            </div>
-
-            {erroModalEvento && <div style={styles.modalAlertErro}>⚠️ {erroModalEvento}</div>}
-
-            <form onSubmit={handleSalvarNovoEvento} style={styles.modalForm}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Nome do evento</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Torneio CrossFit Rio 2026"
-                  value={novoEvento.nome}
-                  onChange={(e) => alterarNovoEvento('nome', e.target.value)}
-                  required
-                  style={styles.input}
-                />
               </div>
 
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Data de início (DD/MM/AAAA)</label>
-                  <input
-                    type="text"
-                    placeholder="DD/MM/AAAA"
-                    maxLength={10}
-                    value={novoEvento.dataInicio}
-                    onChange={(e) => alterarNovoEvento('dataInicio', mascaraData(e.target.value))}
-                    required
-                    style={styles.input}
-                  />
-                </div>
-                <div style={{ ...styles.inputGroup, flex: 1 }}>
-                  <label style={styles.label}>Data de término (opcional)</label>
-                  <input
-                    type="text"
-                    placeholder="DD/MM/AAAA"
-                    maxLength={10}
-                    value={novoEvento.dataFim}
-                    onChange={(e) => alterarNovoEvento('dataFim', mascaraData(e.target.value))}
-                    style={styles.input}
-                  />
-                </div>
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Localização</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Ginásio Caio Martins - Niterói, RJ"
-                  value={novoEvento.localizacao}
-                  onChange={(e) => alterarNovoEvento('localizacao', e.target.value)}
-                  style={styles.input}
-                />
-              </div>
-
-              <div style={styles.regrasSection}>
-                <span style={{ ...styles.label, color: '#00bfff' }}>Selecione os critérios para subir de categoria:</span>
-                {REGRAS.map(({ campo, rotuloLongo }) => (
-                  <label key={campo} style={styles.checkboxLabel}>
-                    <input
-                      type="checkbox"
-                      checked={novoEvento[campo]}
-                      onChange={(e) => alterarNovoEvento(campo, e.target.checked)}
-                    />
-                    <span>{rotuloLongo}</span>
-                  </label>
+              <div style={styles.categoriasListChips}>
+                {novoEvento.categorias.map((c, i) => (
+                  <span key={i} style={styles.catChip}>
+                    {descreverCategoria(c)}
+                    <button
+                      type="button"
+                      onClick={() => alterarNovoEvento('categorias', novoEvento.categorias.filter((_, idx) => idx !== i))}
+                      style={styles.btnRemoverChip}
+                    >
+                      ✕
+                    </button>
+                  </span>
                 ))}
               </div>
+            </div>
 
-              <div style={styles.categoriasBuilder}>
-                <span style={styles.label}>Categorias do torneio:</span>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                  <select
-                    value={novaCatCriacao.formato}
-                    onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, formato: e.target.value })}
-                    style={styles.select}
-                  >
-                    <Opcoes valores={FORMATOS} />
-                  </select>
-
-                  <select
-                    value={novaCatCriacao.genero}
-                    onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, genero: e.target.value })}
-                    style={styles.select}
-                  >
-                    <Opcoes valores={GENEROS} />
-                  </select>
-
-                  <select
-                    value={novaCatCriacao.nivel}
-                    onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, nivel: e.target.value })}
-                    style={styles.select}
-                  >
-                    <Opcoes valores={NIVEIS} />
-                  </select>
-
-                  <button
-                    type="button"
-                    onClick={() => alterarNovoEvento('categorias', [...novoEvento.categorias, { ...novaCatCriacao }])}
-                    style={styles.btnAddCat}
-                  >
-                    + Adicionar
-                  </button>
-                </div>
-
-                <div style={styles.categoriasListChips}>
-                  {novoEvento.categorias.map((c, i) => (
-                    <span key={i} style={styles.catChip}>
-                      {descreverCategoria(c)}
-                      <button
-                        type="button"
-                        onClick={() => alterarNovoEvento('categorias', novoEvento.categorias.filter((_, idx) => idx !== i))}
-                        style={styles.btnRemoverChip}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div style={styles.modalActions}>
-                <button type="button" onClick={fecharModalCriar} style={styles.btnCancelar}>
-                  Cancelar
-                </button>
-                <button type="submit" disabled={salvando} style={styles.btnSalvarTorneio}>
-                  {salvando ? 'Salvando...' : 'Concluir e salvar torneio'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="modal-acoes">
+              <button type="button" className="botao botao-secundario" onClick={fecharModalCriar}>Cancelar</button>
+              <button type="submit" disabled={salvando} className="botao botao-azul">
+                {salvando ? 'Salvando...' : 'Concluir e salvar torneio'}
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
@@ -942,15 +1018,10 @@ export default function DashboardOrganizador() {
 
 const styles = {
   container: { minHeight: '100vh', backgroundColor: '#0a0c0e', color: '#ffffff', fontFamily: 'system-ui, -apple-system, sans-serif' },
-  navbar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 36px', backgroundColor: '#111418', borderBottom: '1px solid #22272e' },
   navLeft: { display: 'flex', alignItems: 'center', gap: '14px' },
   brand: { fontSize: '1.4rem', fontWeight: '900', letterSpacing: '2px', color: '#00bfff' },
   roleBadge: { fontSize: '0.7rem', fontWeight: '800', backgroundColor: 'rgba(0, 191, 255, 0.12)', color: '#00bfff', padding: '4px 10px', borderRadius: '4px', border: '1px solid rgba(0, 191, 255, 0.3)' },
-  navRight: { display: 'flex', alignItems: 'center', gap: '16px' },
-  btnNovoEvento: { backgroundColor: '#00bfff', color: '#000000', border: 'none', padding: '9px 18px', borderRadius: '8px', fontWeight: '800', fontSize: '0.82rem', cursor: 'pointer' },
-  btnLogout: { backgroundColor: 'transparent', border: '1px solid #2d3748', color: '#cbd5e0', padding: '7px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' },
-  contentLayout: { display: 'flex', minHeight: 'calc(100vh - 67px)' },
-  sidebarEventos: { width: '300px', backgroundColor: '#0d1117', borderRight: '1px solid #22272e', padding: '24px 18px', display: 'flex', flexDirection: 'column', gap: '12px' },
+  sidebarEventos: { backgroundColor: '#0d1117', borderRight: '1px solid #22272e', padding: '24px 18px', display: 'flex', flexDirection: 'column', gap: '12px' },
   sidebarHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
   sidebarTitle: { margin: 0, fontSize: '0.85rem', color: '#a0aec0', letterSpacing: '0.5px', fontWeight: '700' },
   badgeContador: { backgroundColor: '#1f2937', color: '#00bfff', fontSize: '0.75rem', padding: '2px 8px', borderRadius: '10px', fontWeight: 'bold' },
@@ -960,10 +1031,9 @@ const styles = {
   eventoCardNome: { margin: 0, fontSize: '0.98rem', fontWeight: '700' },
   btnExcluirEventoMini: { backgroundColor: 'transparent', color: '#ff4444', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '4px', fontSize: '0.7rem', padding: '2px 6px', cursor: 'pointer', fontWeight: '600' },
   eventoCardMeta: { display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.78rem', color: '#8b949e' },
-  mainGestao: { flex: 1, padding: '32px 40px', overflowY: 'auto' },
   labelSub: { fontSize: '0.75rem', fontWeight: '700', color: '#00bfff' },
   eventoHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' },
-  eventoNomeTitulo: { fontSize: '2rem', fontWeight: '900', margin: '4px 0 0 0' },
+  eventoNomeTitulo: { fontSize: 'clamp(1.4rem, 4vw, 2rem)', fontWeight: '900', margin: '4px 0 0 0' },
   eventoInfoDetalhe: { color: '#8b949e', fontSize: '0.92rem', marginTop: '6px' },
   regrasBox: { backgroundColor: '#111418', border: '1px solid #22272e', padding: '12px 18px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '8px' },
   regrasTitulo: { fontSize: '0.78rem', color: '#a0aec0', fontWeight: 'bold' },
@@ -975,46 +1045,29 @@ const styles = {
   categoriasNav: { display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '6px' },
   categoriaPill: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', borderRadius: '8px', border: '1px solid', whiteSpace: 'nowrap' },
   btnExcluirCatPill: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', padding: '0 2px' },
-  gestaoInscricoesCard: { backgroundColor: '#111418', border: '1px solid #22272e', borderRadius: '14px', padding: '26px' },
-  inscricaoHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  formInserirAtleta: { display: 'flex', gap: '10px', marginBottom: '18px', position: 'relative' },
+  gestaoInscricoesCard: { backgroundColor: '#111418', border: '1px solid #22272e', borderRadius: '14px', padding: 'clamp(16px, 3vw, 26px)' },
   inputBusca: { width: '100%', boxSizing: 'border-box', padding: '12px 16px', borderRadius: '8px', backgroundColor: '#0a0c0e', border: '1px solid #2d3748', color: '#ffffff', outline: 'none', fontSize: '0.9rem' },
   dropdownSugestoes: { position: 'absolute', top: '48px', left: 0, right: 0, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', zIndex: 99, maxHeight: '240px', overflowY: 'auto', boxShadow: '0 12px 28px rgba(0,0,0,0.8)' },
-  dropdownItem: { padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #21262d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  dropdownItem: { padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #21262d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' },
   dropdownNome: { display: 'block', color: '#ffffff', fontWeight: 'bold', fontSize: '0.88rem' },
   dropdownBox: { display: 'block', color: '#8b949e', fontSize: '0.78rem', marginTop: '2px' },
-  badgeInscreverDireto: { fontSize: '0.75rem', backgroundColor: '#238636', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold' },
-  feedbackBox: { padding: '10px 16px', borderRadius: '8px', border: '1px solid', marginBottom: '16px', fontSize: '0.84rem', fontWeight: 'bold' },
-  tabelaWrapper: { overflowX: 'auto' },
+  badgeInscreverDireto: { fontSize: '0.75rem', backgroundColor: '#238636', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold', whiteSpace: 'nowrap' },
   tabela: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },
   thRow: { borderBottom: '1px solid #2d3748' },
   th: { padding: '14px 12px', color: '#718096', fontSize: '0.75rem', fontWeight: '700' },
   tr: { borderBottom: '1px solid #1a202c' },
   td: { padding: '16px 12px', fontSize: '0.88rem', verticalAlign: 'middle' },
-  statusBadge: { padding: '4px 10px', borderRadius: '6px', border: '1px solid', fontWeight: '800', fontSize: '0.72rem', display: 'inline-block' },
-  badgeCategoriaRec: { backgroundColor: 'rgba(0, 191, 255, 0.12)', color: '#00bfff', border: '1px solid rgba(0, 191, 255, 0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: '700', fontSize: '0.78rem', display: 'inline-block' },
-  btnExcluirAtleta: { backgroundColor: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '6px', padding: '7px 14px', fontSize: '0.78rem', fontWeight: '700', cursor: 'pointer' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.82)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, padding: '16px' },
-  modalContent: { backgroundColor: '#111418', border: '1px solid #22272e', borderRadius: '14px', padding: '28px', maxWidth: '560px', width: '100%', boxShadow: '0 25px 50px rgba(0,0,0,0.9)' },
-  modalContentSmall: { backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '12px', padding: '24px', maxWidth: '420px', width: '100%', boxShadow: '0 20px 40px rgba(0,0,0,0.9)' },
-  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' },
-  modalAlertErro: { backgroundColor: 'rgba(255, 68, 68, 0.12)', border: '1px solid #ff4444', color: '#ff4444', padding: '10px 14px', borderRadius: '8px', fontSize: '0.82rem', fontWeight: '600', marginBottom: '14px' },
-  btnFecharModal: { background: 'transparent', border: 'none', color: '#8b949e', fontSize: '1.2rem', cursor: 'pointer' },
+  statusBadge: { padding: '4px 10px', borderRadius: '6px', border: '1px solid', fontWeight: '800', fontSize: '0.72rem', display: 'inline-block', whiteSpace: 'nowrap' },
+  badgeCategoriaRec: { backgroundColor: 'rgba(0, 191, 255, 0.12)', color: '#00bfff', border: '1px solid rgba(0, 191, 255, 0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: '700', fontSize: '0.78rem', display: 'inline-block', whiteSpace: 'nowrap' },
+  inputColocacao: { width: '64px', padding: '8px', borderRadius: '6px', backgroundColor: '#0a0c0e', border: '1px solid #2d3748', color: '#ffffff', fontSize: '0.9rem', textAlign: 'center', outline: 'none' },
+  btnExcluirAtleta: { backgroundColor: 'rgba(255, 68, 68, 0.1)', color: '#ff4444', border: '1px solid rgba(255, 68, 68, 0.3)', borderRadius: '6px', padding: '7px 14px', fontSize: '0.78rem', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap' },
   modalForm: { display: 'flex', flexDirection: 'column', gap: '14px' },
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '5px' },
-  label: { fontSize: '0.75rem', color: '#a0aec0', fontWeight: '700' },
-  input: { padding: '11px', borderRadius: '8px', backgroundColor: '#0a0c0e', border: '1px solid #2d3748', color: '#ffffff', fontSize: '0.9rem', outline: 'none' },
   select: { padding: '9px', borderRadius: '8px', backgroundColor: '#0a0c0e', border: '1px solid #2d3748', color: '#ffffff', fontSize: '0.82rem', outline: 'none' },
-  regrasSection: { backgroundColor: '#161b22', padding: '14px', borderRadius: '10px', border: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '8px' },
+  regrasSection: { backgroundColor: '#0d1117', padding: '14px', borderRadius: '10px', border: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '8px' },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', color: '#cbd5e0', cursor: 'pointer' },
   categoriasBuilder: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  btnAddCat: { backgroundColor: '#238636', color: '#ffffff', border: 'none', borderRadius: '8px', padding: '0 14px', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer' },
   categoriasListChips: { display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '90px', overflowY: 'auto' },
   catChip: { backgroundColor: '#1f2937', color: '#00bfff', border: '1px solid rgba(0, 191, 255, 0.3)', padding: '5px 10px', borderRadius: '6px', fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '6px' },
   btnRemoverChip: { background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer', fontSize: '0.85rem' },
-  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px' },
-  btnCancelar: { backgroundColor: 'transparent', border: '1px solid #30363d', color: '#cbd5e0', padding: '9px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' },
-  btnSalvarTorneio: { backgroundColor: '#00bfff', color: '#000000', border: 'none', padding: '9px 20px', borderRadius: '6px', fontWeight: '800', cursor: 'pointer', fontSize: '0.85rem' },
-  btnConfirmarExclusao: { backgroundColor: '#da3633', color: '#ffffff', border: 'none', padding: '9px 18px', borderRadius: '6px', fontWeight: '800', cursor: 'pointer', fontSize: '0.82rem' },
   emptyMain: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '360px', textAlign: 'center' }
 };

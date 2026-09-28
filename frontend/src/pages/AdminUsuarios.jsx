@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { encerrarSessao } from '../api';
 import { estiloFeedback } from '../tema';
+import ModalConfirmacao from '../components/ModalConfirmacao';
 
 const FILTROS_PERFIL = ['TODOS', 'ATLETA', 'ORGANIZADOR'];
 
@@ -47,7 +48,7 @@ export default function AdminUsuarios() {
   return (
     <div style={styles.container}>
       {/* Barra de Navegação */}
-      <header style={styles.navbar}>
+      <header className="barra-topo">
         <div style={styles.navBrand}>
           <span style={styles.brand}>FAIRPLAY</span>
           <span style={styles.adminBadge}>PAINEL ADMINISTRATIVO</span>
@@ -129,13 +130,13 @@ export default function AdminUsuarios() {
                         {u.nomeCompleto}
                       </td>
                       <td style={styles.td}>
-                        <div>{u.email}</div>
+                        <div>{u.email || '—'}</div>
                         <small style={{ color: '#718096' }}>{u.celular || 'Sem celular'}</small>
                       </td>
-                      <td style={{ ...styles.td, color: '#a0aec0' }}>{u.cpf}</td>
+                      <td style={{ ...styles.td, color: '#a0aec0' }}>{u.cpf || '—'}</td>
                       <td style={styles.td}>
                         <div>{u.nomeBox || 'N/D'}</div>
-                        <small style={{ color: '#718096' }}>{u.cidade} - {u.estado}</small>
+                        <small style={{ color: '#718096' }}>{u.cidade ? `${u.cidade} - ${u.estado}` : 'Cidade não informada'}</small>
                       </td>
                       <td style={styles.td}>
                         <span style={{
@@ -165,33 +166,19 @@ export default function AdminUsuarios() {
         </div>
       </main>
 
-      {/* Modal de Confirmação de Exclusão */}
       {usuarioParaExcluir && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalCard}>
-            <h3 style={{ color: '#ff4444', margin: '0 0 12px 0' }}>⚠️ Confirmar Exclusão</h3>
-            <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5' }}>
-              Tem certeza de que deseja excluir o usuário <strong>{usuarioParaExcluir.nomeCompleto}</strong> (ID: #{usuarioParaExcluir.id})?
-            </p>
-            <p style={{ color: '#8b949e', fontSize: '0.8rem' }}>
-              Se houver histórico esportivo vinculado a esta conta, os registros serão liberados novamente para novas vinculações.
-            </p>
-            <div style={styles.modalActions}>
-              <button
-                onClick={() => setUsuarioParaExcluir(null)}
-                style={styles.btnModalCancelar}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleExcluir}
-                style={styles.btnModalConfirmar}
-              >
-                Sim, Excluir Conta
-              </button>
-            </div>
-          </div>
-        </div>
+        <ModalConfirmacao
+          titulo="⚠️ Confirmar Exclusão"
+          textoConfirmar="Sim, Excluir Conta"
+          textoProcessando="Excluindo..."
+          onConfirmar={handleExcluir}
+          onCancelar={() => setUsuarioParaExcluir(null)}
+        >
+          Tem certeza de que deseja excluir o usuário <strong>{usuarioParaExcluir.nomeCompleto}</strong> (ID: #{usuarioParaExcluir.id})?
+          <span style={{ display: 'block', color: '#8b949e', fontSize: '0.8rem', marginTop: '8px' }}>
+            Se houver histórico esportivo vinculado a esta conta, os registros serão liberados novamente para novas vinculações.
+          </span>
+        </ModalConfirmacao>
       )}
     </div>
   );
@@ -203,14 +190,6 @@ const styles = {
     backgroundColor: '#0a0c0e',
     color: '#ffffff',
     fontFamily: 'system-ui, -apple-system, sans-serif',
-  },
-  navbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 36px',
-    backgroundColor: '#111418',
-    borderBottom: '1px solid #22272e',
   },
   navBrand: {
     display: 'flex',
@@ -366,53 +345,5 @@ const styles = {
     fontWeight: '700',
     cursor: 'pointer',
     transition: 'all 0.2s',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: '16px',
-    zIndex: 9999,
-  },
-  modalCard: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '12px',
-    padding: '24px',
-    maxWidth: '460px',
-    width: '100%',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '12px',
-    marginTop: '20px',
-  },
-  btnModalCancelar: {
-    backgroundColor: 'transparent',
-    border: '1px solid #30363d',
-    color: '#c9d1d9',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: '600',
-    fontSize: '0.85rem',
-  },
-  btnModalConfirmar: {
-    backgroundColor: '#da3633',
-    border: 'none',
-    color: '#ffffff',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: '700',
-    fontSize: '0.85rem',
   },
 };

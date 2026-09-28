@@ -2,6 +2,22 @@
 
 const apenasDigitos = (valor) => valor.replace(/\D/g, '');
 
+/** Mesmo mínimo exigido pelo backend (ValidacaoCadastro.TAMANHO_MINIMO_SENHA). */
+export const TAMANHO_MINIMO_SENHA = 6;
+
+/** CPF com 11 dígitos, que não seja sequência repetida e com os dígitos verificadores corretos. */
+export function cpfValido(cpf) {
+  const d = apenasDigitos(cpf || '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const verificador = (quantidade) => {
+    let soma = 0;
+    for (let i = 0; i < quantidade; i++) soma += Number(d[i]) * (quantidade + 1 - i);
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  return verificador(9) === Number(d[9]) && verificador(10) === Number(d[10]);
+}
+
 /** 12345678901 → 123.456.789-01 (formata enquanto o usuário digita). */
 export function mascaraCpf(valor) {
   return apenasDigitos(valor)

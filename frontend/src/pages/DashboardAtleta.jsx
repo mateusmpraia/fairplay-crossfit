@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { encerrarSessao } from '../api';
-import { dataIsoParaMesAno } from '../utils/formatacao';
-import { estiloFeedback } from '../tema';
+import { dataIsoParaBr, dataIsoParaMesAno } from '../utils/formatacao';
+import Modal from '../components/Modal';
+import Alerta from '../components/Alerta';
+import ModalTrocarSenha from '../components/ModalTrocarSenha';
 
 /** Visual do selo de colocação para o pódio (1º, 2º e 3º lugares). */
 const PODIO = {
@@ -11,7 +13,19 @@ const PODIO = {
   3: { texto: '🥉 3º Lugar', color: '#cd7f32', backgroundColor: 'rgba(205, 127, 50, 0.12)', borderColor: '#cd7f32' },
 };
 
+/** De onde veio cada linha do histórico. */
+const ORIGENS = {
+  EVENTO: { texto: 'Evento FairPlay', cor: '#00ff88' },
+  MANUAL: { texto: 'Lançamento manual', cor: '#00bfff' },
+  HISTORICO: { texto: 'Histórico importado', cor: '#8b949e' },
+};
+
+const NIVEIS = { INICIANTE: 'Iniciante', SCALE: 'Scale', INTERMEDIARIO: 'Intermediário', RX: 'RX', ELITE: 'Elite', MASTER: 'Master' };
+
 function SeloColocacao({ colocacao }) {
+  if (!colocacao) {
+    return <span style={styles.rankBadge}>—</span>;
+  }
   const podio = PODIO[colocacao];
   if (!podio) {
     return <span style={styles.rankBadge}>{colocacao}º Lugar</span>;
@@ -20,15 +34,31 @@ function SeloColocacao({ colocacao }) {
   return <span style={{ ...styles.podioBadge, ...cores }}>{texto}</span>;
 }
 
+function SeloStatus({ status }) {
+  const regular = status === 'REGULAR';
+  return (
+    <span style={{
+      ...styles.statusBadge,
+      backgroundColor: regular ? 'rgba(0, 255, 136, 0.12)' : 'rgba(255, 68, 68, 0.12)',
+      color: regular ? '#00ff88' : '#ff4444',
+      borderColor: regular ? 'rgba(0, 255, 136, 0.4)' : 'rgba(255, 68, 68, 0.4)',
+    }}>
+      {regular ? '● Regular' : '▲ Irregular'}
+    </span>
+  );
+}
+
 export default function DashboardAtleta() {
   const navigate = useNavigate();
 
   const [dashboardData, setDashboardData] = useState(null);
+  const [inscricoes, setInscricoes] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
-  // Modal de edição de perfil
+  // Modais
   const [modalEditarAberto, setModalEditarAberto] = useState(false);
+  const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
   const [editNome, setEditNome] = useState('');
   const [editBox, setEditBox] = useState('');
   const [salvandoPerfil, setSalvandoPerfil] = useState(false);
@@ -38,8 +68,11 @@ export default function DashboardAtleta() {
   const atletaId = localStorage.getItem('atletaId');
 
   useEffect(() => {
-    api.get(`/atletas/${atletaId}/dashboard`)
-      .then(({ data }) => setDashboardData(data))
+    Promise.all([api.get(`/atletas/${atletaId}/dashboard`), api.get(`/atletas/${atletaId}/inscricoes`)])
+      .then(([painel, minhasInscricoes]) => {
+        setDashboardData(painel.data);
+        setInscricoes(minhasInscricoes.data || []);
+      })
       .catch(() => setErro('Não foi possível carregar os dados do atleta.'))
       .finally(() => setCarregando(false));
   }, [atletaId]);
@@ -47,6 +80,7 @@ export default function DashboardAtleta() {
   const abrirModalEditar = () => {
     setEditNome(dashboardData.nomeCompleto);
     setEditBox(dashboardData.nomeBox);
+    setFeedbackPerfil({ tipo: '', texto: '' });
     setModalEditarAberto(true);
   };
 
@@ -93,41 +127,34 @@ export default function DashboardAtleta() {
     return (
       <div style={styles.loadingContainer}>
         <h2 style={{ color: '#ff4444' }}>{erro || 'Atleta não encontrado.'}</h2>
-        <button onClick={() => navigate('/login')} style={styles.logoutButton}>Voltar ao Login</button>
+        <button onClick={() => navigate('/login')} className="botao botao-secundario">Voltar ao Login</button>
       </div>
     );
   }
 
   return (
     <div style={styles.container}>
-      {/* Barra Superior */}
-      <header style={styles.navbar}>
+      <header className="barra-topo">
         <div style={styles.navLeft}>
           <span style={styles.brand}>FAIRPLAY</span>
           <span style={styles.roleBadge}>HISTÓRICO DO ATLETA</span>
         </div>
 
-        <div style={styles.navRight}>
-          <button onClick={abrirModalEditar} style={styles.btnEditarPerfil}>
-            ✏️ Editar Perfil
-          </button>
-          <button onClick={handleLogout} style={styles.logoutButton}>
-            Sair
-          </button>
+        <div className="barra-topo-acoes">
+          <button onClick={abrirModalEditar} style={styles.btnEditarPerfil}>✏️ Editar Perfil</button>
+          <button onClick={() => setModalSenhaAberto(true)} className="botao botao-secundario">🔑 Trocar senha</button>
+          <button onClick={handleLogout} className="botao botao-secundario">Sair</button>
         </div>
       </header>
 
-      {/* Conteúdo Principal */}
-      <main style={styles.mainContent}>
-        
-        {/* Banner Central com Nome do Atleta */}
+      <main className="conteudo-central" style={styles.mainContent}>
+
         <section style={styles.profileCentralBanner}>
           <span style={styles.profileBadge}>PERFIL DO ATLETA</span>
           <h1 style={styles.athleteNameCentral}>{dashboardData.nomeCompleto}</h1>
-          <p style={styles.athleteBoxCentral}>📍 {dashboardData.nomeBox} • {dashboardData.estado}</p>
+          <p style={styles.athleteBoxCentral}>📍 {dashboardData.nomeBox}{dashboardData.estado ? ` • ${dashboardData.estado}` : ''}</p>
         </section>
 
-        {/* Cards de Métricas e Categoria Recomendada */}
         <section style={styles.metricsGrid}>
           <div style={styles.metricCard}>
             <span style={styles.metricLabel}>Total de Campeonatos</span>
@@ -153,34 +180,83 @@ export default function DashboardAtleta() {
           </div>
         </section>
 
-        {/* Tabela de Histórico */}
-        <section style={styles.tableSection}>
-          <div style={styles.tableCard}>
-            <div style={styles.tableHeader}>
-              <h2 style={styles.tableTitle}>Histórico de Participações</h2>
-              <span style={styles.tableCounter}>{dashboardData.totalParticipacoes} registros</span>
-            </div>
+        {/* Eventos em que o atleta está inscrito */}
+        <section style={styles.tableCard}>
+          <div style={styles.tableHeader}>
+            <h2 style={styles.tableTitle}>Minhas inscrições</h2>
+            <span style={styles.tableCounter}>{inscricoes.length} evento(s)</span>
+          </div>
 
-            <div style={styles.tableResponsive}>
-              {dashboardData.historico.length === 0 ? (
-                <p style={{ color: '#718096', padding: '20px 0', textAlign: 'center' }}>
-                  Nenhum campeonato registrado para este atleta até o momento.
-                </p>
-              ) : (
-                <table style={styles.table}>
-                  <thead>
-                    <tr style={styles.thRow}>
-                      <th style={styles.th}>NOME DO CAMPEONATO</th>
-                      <th style={styles.th}>DATA (MÊS/ANO)</th>
-                      <th style={styles.th}>CATEGORIA DISPUTADA</th>
-                      <th style={styles.th}>COLOCAÇÃO FINAL</th>
+          {inscricoes.length === 0 ? (
+            <p style={styles.vazio}>Você ainda não foi inscrito em nenhum evento do FairPlay.</p>
+          ) : (
+            <div className="tabela-rolavel">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.thRow}>
+                    <th style={styles.th}>EVENTO</th>
+                    <th style={styles.th}>DATA</th>
+                    <th style={styles.th}>CATEGORIA</th>
+                    <th style={styles.th}>AUDITORIA</th>
+                    <th style={styles.th}>COLOCAÇÃO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inscricoes.map((ins) => (
+                    <tr key={ins.id} style={styles.tr}>
+                      <td style={{ ...styles.td, fontWeight: '700', color: '#ffffff' }}>
+                        {ins.evento}
+                        {ins.localizacao && <small style={styles.detalhe}>📍 {ins.localizacao}</small>}
+                      </td>
+                      <td style={{ ...styles.td, color: '#a0aec0', whiteSpace: 'nowrap' }}>📅 {dataIsoParaBr(ins.dataInicio)}</td>
+                      <td style={styles.td}>
+                        <span style={styles.categoryBadge}>{ins.formato} • {ins.genero} • {NIVEIS[ins.nivel] || ins.nivel}</span>
+                      </td>
+                      <td style={styles.td}>
+                        <SeloStatus status={ins.statusElegibilidade} />
+                        {ins.statusElegibilidade !== 'REGULAR' && (
+                          <small style={{ ...styles.detalhe, color: '#ffa500' }}>
+                            Recomendada: {ins.categoriaRecomendada}. {ins.motivoIrregularidade}
+                          </small>
+                        )}
+                      </td>
+                      <td style={styles.td}><SeloColocacao colocacao={ins.colocacao} /></td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {dashboardData.historico.map((item) => (
-                      <tr key={item.id} style={styles.tr}>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Histórico de resultados (eventos do FairPlay, lançamentos manuais e histórico importado) */}
+        <section style={styles.tableCard}>
+          <div style={styles.tableHeader}>
+            <h2 style={styles.tableTitle}>Histórico de Participações</h2>
+            <span style={styles.tableCounter}>{dashboardData.totalParticipacoes} registros</span>
+          </div>
+
+          {dashboardData.historico.length === 0 ? (
+            <p style={styles.vazio}>Nenhum campeonato registrado para este atleta até o momento.</p>
+          ) : (
+            <div className="tabela-rolavel">
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.thRow}>
+                    <th style={styles.th}>NOME DO CAMPEONATO</th>
+                    <th style={styles.th}>DATA (MÊS/ANO)</th>
+                    <th style={styles.th}>CATEGORIA DISPUTADA</th>
+                    <th style={styles.th}>COLOCAÇÃO FINAL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardData.historico.map((item) => {
+                    const origem = ORIGENS[item.origem] || ORIGENS.HISTORICO;
+                    return (
+                      <tr key={`${item.origem}-${item.id}`} style={styles.tr}>
                         <td style={{ ...styles.td, fontWeight: '700', color: '#ffffff' }}>
                           {item.nomeCampeonato}
+                          <small style={{ ...styles.detalhe, color: origem.cor }}>{origem.texto}</small>
                         </td>
                         <td style={{ ...styles.td, color: '#a0aec0' }}>
                           📅 {item.dataCampeonato ? dataIsoParaMesAno(item.dataCampeonato) : 'Histórico Consolidado'}
@@ -192,87 +268,46 @@ export default function DashboardAtleta() {
                           <SeloColocacao colocacao={item.colocacao} />
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
         </section>
-
       </main>
 
-      {/* Modal de Edição de Nome e Box */}
+      {modalSenhaAberto && <ModalTrocarSenha onFechar={() => setModalSenhaAberto(false)} />}
+
       {modalEditarAberto && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalCard}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#00ff88', margin: 0, fontSize: '1.2rem' }}>Editar Perfil</h3>
-              <button 
-                type="button" 
-                onClick={() => setModalEditarAberto(false)}
-                style={styles.btnFecharModal}
-              >
-                ✕
+        <Modal titulo="Editar Perfil" corTitulo="#00ff88" onFechar={() => setModalEditarAberto(false)} bloqueado={salvandoPerfil}>
+          <p style={{ color: '#a0aec0', fontSize: '0.84rem', marginBottom: '16px' }}>
+            Atualize o seu nome de exibição e o box/CT onde você treina atualmente.
+          </p>
+
+          <Alerta tipo={feedbackPerfil.tipo}>{feedbackPerfil.texto}</Alerta>
+
+          <form onSubmit={handleSalvarPerfil} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <label className="campo">
+              <span className="campo-rotulo">Nome Completo</span>
+              <input type="text" className="campo-entrada" value={editNome} onChange={(e) => setEditNome(e.target.value)} required />
+            </label>
+
+            <label className="campo">
+              <span className="campo-rotulo">Box / CT Atual</span>
+              <input type="text" className="campo-entrada" value={editBox} onChange={(e) => setEditBox(e.target.value)} required />
+            </label>
+
+            <div className="modal-acoes">
+              <button type="button" className="botao botao-secundario" onClick={() => setModalEditarAberto(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className="botao botao-verde" disabled={salvandoPerfil}>
+                {salvandoPerfil ? 'Salvando...' : 'Salvar Alterações'}
               </button>
             </div>
-
-            <p style={{ color: '#a0aec0', fontSize: '0.84rem', margin: '8px 0 16px 0' }}>
-              Atualize o seu nome de exibição e o box/CT onde você treina atualmente.
-            </p>
-
-            {feedbackPerfil.texto && (
-              <div style={{ ...styles.modalAlert, ...estiloFeedback(feedbackPerfil.tipo) }}>
-                {feedbackPerfil.texto}
-              </div>
-            )}
-
-            <form onSubmit={handleSalvarPerfil} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Nome Completo</label>
-                <input
-                  type="text"
-                  value={editNome}
-                  onChange={(e) => setEditNome(e.target.value)}
-                  required
-                  style={styles.input}
-                />
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Box / CT Atual</label>
-                <input
-                  type="text"
-                  value={editBox}
-                  onChange={(e) => setEditBox(e.target.value)}
-                  required
-                  style={styles.input}
-                />
-              </div>
-
-              <div style={styles.modalActions}>
-                <button
-                  type="button"
-                  onClick={() => setModalEditarAberto(false)}
-                  style={styles.btnModalCancelar}
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="submit" 
-                  disabled={salvandoPerfil}
-                  style={{
-                    ...styles.btnModalConfirmar,
-                    opacity: salvandoPerfil ? 0.6 : 1,
-                    cursor: salvandoPerfil ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {salvandoPerfil ? 'Salvando...' : 'Salvar Alterações'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
     </div>
   );
@@ -293,14 +328,6 @@ const styles = {
     alignItems: 'center',
     backgroundColor: '#0a0c0e',
     gap: '16px',
-  },
-  navbar: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 40px',
-    backgroundColor: '#111418',
-    borderBottom: '1px solid #22272e',
   },
   navLeft: {
     display: 'flex',
@@ -323,36 +350,17 @@ const styles = {
     border: '1px solid rgba(0, 255, 136, 0.3)',
     letterSpacing: '1px',
   },
-  navRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
   btnEditarPerfil: {
     backgroundColor: 'transparent',
     border: '1px solid #30363d',
     color: '#00ff88',
-    padding: '7px 14px',
+    padding: '8px 14px',
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '0.82rem',
     fontWeight: '700',
-    transition: 'all 0.2s',
-  },
-  logoutButton: {
-    backgroundColor: 'transparent',
-    border: '1px solid #2d3748',
-    color: '#e2e8f0',
-    padding: '7px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '0.82rem',
-    fontWeight: '600',
   },
   mainContent: {
-    maxWidth: '1050px',
-    margin: '0 auto',
-    padding: '32px 24px',
     display: 'flex',
     flexDirection: 'column',
     gap: '24px',
@@ -380,7 +388,7 @@ const styles = {
     marginBottom: '10px',
   },
   athleteNameCentral: {
-    fontSize: '2.2rem',
+    fontSize: 'clamp(1.5rem, 5vw, 2.2rem)',
     fontWeight: '900',
     margin: 0,
     color: '#ffffff',
@@ -389,11 +397,10 @@ const styles = {
     color: '#a0aec0',
     fontSize: '1rem',
     marginTop: '6px',
-    margin: 0,
   },
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
     gap: '16px',
   },
   metricCard: {
@@ -434,10 +441,6 @@ const styles = {
     fontSize: '0.75rem',
     color: '#718096',
   },
-  tableSection: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
   tableCard: {
     backgroundColor: '#111418',
     borderRadius: '12px',
@@ -449,6 +452,7 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '16px',
+    gap: '12px',
   },
   tableTitle: {
     fontSize: '1.2rem',
@@ -459,8 +463,10 @@ const styles = {
     fontSize: '0.8rem',
     color: '#718096',
   },
-  tableResponsive: {
-    overflowX: 'auto',
+  vazio: {
+    color: '#718096',
+    padding: '20px 0',
+    textAlign: 'center',
   },
   table: {
     width: '100%',
@@ -484,6 +490,14 @@ const styles = {
     padding: '16px 14px',
     fontSize: '0.9rem',
     color: '#cbd5e0',
+    verticalAlign: 'top',
+  },
+  detalhe: {
+    display: 'block',
+    fontSize: '0.75rem',
+    fontWeight: '500',
+    color: '#718096',
+    marginTop: '4px',
   },
   categoryBadge: {
     backgroundColor: '#1c222b',
@@ -493,6 +507,15 @@ const styles = {
     borderRadius: '6px',
     fontSize: '0.8rem',
     fontWeight: '600',
+    whiteSpace: 'nowrap',
+  },
+  statusBadge: {
+    padding: '4px 10px',
+    borderRadius: '6px',
+    border: '1px solid',
+    fontWeight: '800',
+    fontSize: '0.72rem',
+    display: 'inline-block',
   },
   podioBadge: {
     padding: '5px 10px',
@@ -501,6 +524,7 @@ const styles = {
     fontWeight: '700',
     fontSize: '0.82rem',
     display: 'inline-block',
+    whiteSpace: 'nowrap',
   },
   rankBadge: {
     backgroundColor: '#1a202c',
@@ -510,92 +534,4 @@ const styles = {
     fontWeight: '600',
     fontSize: '0.82rem',
   },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 9999,
-    padding: '16px',
-  },
-  modalCard: {
-    backgroundColor: '#161b22',
-    border: '1px solid #30363d',
-    borderRadius: '12px',
-    padding: '24px',
-    maxWidth: '420px',
-    width: '100%',
-    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.85)',
-  },
-  modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  btnFecharModal: {
-    background: 'transparent',
-    border: 'none',
-    color: '#8b949e',
-    fontSize: '1.2rem',
-    cursor: 'pointer',
-  },
-  modalAlert: {
-    padding: '10px',
-    borderRadius: '6px',
-    border: '1px solid',
-    fontSize: '0.82rem',
-    marginBottom: '12px',
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  label: {
-    fontSize: '0.72rem',
-    color: '#a0aec0',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  input: {
-    padding: '11px 13px',
-    borderRadius: '8px',
-    backgroundColor: '#0a0c0e',
-    border: '1px solid #2d3748',
-    color: '#ffffff',
-    fontSize: '0.9rem',
-    outline: 'none',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: '10px',
-    marginTop: '10px',
-  },
-  btnModalCancelar: {
-    backgroundColor: 'transparent',
-    border: '1px solid #30363d',
-    color: '#c9d1d9',
-    padding: '8px 14px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '0.82rem',
-    fontWeight: '600',
-  },
-  btnModalConfirmar: {
-    backgroundColor: '#238636',
-    border: 'none',
-    color: '#ffffff',
-    padding: '8px 16px',
-    borderRadius: '6px',
-    fontWeight: '700',
-    fontSize: '0.82rem',
-  }
 };

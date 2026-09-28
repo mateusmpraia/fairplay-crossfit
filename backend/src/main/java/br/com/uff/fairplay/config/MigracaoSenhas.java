@@ -14,7 +14,8 @@ import java.util.List;
 
 /**
  * Ao iniciar, converte em hash BCrypt as senhas que ainda estão salvas em texto puro
- * (cadastros feitos antes do uso de hash). Quem já está com hash não é alterado.
+ * (cadastros feitos antes do uso de hash). Quem já está com hash ou não tem senha (atletas
+ * pendentes do histórico) não é alterado.
  */
 @Component
 public class MigracaoSenhas implements ApplicationRunner {
@@ -33,7 +34,7 @@ public class MigracaoSenhas implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         List<Atleta> pendentes = atletaRepository.findAll().stream()
-                .filter(a -> !ehHashBcrypt(a.getSenha()))
+                .filter(a -> a.getSenha() != null && !ehHashBcrypt(a.getSenha()))
                 .toList();
 
         pendentes.forEach(a -> a.setSenha(passwordEncoder.encode(a.getSenha())));

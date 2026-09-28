@@ -5,16 +5,13 @@ import br.com.uff.fairplay.repository.SessaoRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.Base64;
 import java.util.Optional;
 
 /** Cria, valida e encerra as sessões de login (tokens opacos guardados no banco). */
 @Service
 public class SessaoService {
 
-    private final SecureRandom random = new SecureRandom();
     private final SessaoRepository sessaoRepository;
     private final long duracaoHoras;
 
@@ -29,11 +26,8 @@ public class SessaoService {
         LocalDateTime agora = LocalDateTime.now();
         sessaoRepository.deleteByExpiraEmBefore(agora);
 
-        byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
-
         Sessao sessao = new Sessao();
-        sessao.setToken(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+        sessao.setToken(GeradorToken.novo());
         sessao.setUsuarioId(usuarioId);
         sessao.setPerfil(perfil);
         sessao.setExpiraEm(agora.plusHours(duracaoHoras));

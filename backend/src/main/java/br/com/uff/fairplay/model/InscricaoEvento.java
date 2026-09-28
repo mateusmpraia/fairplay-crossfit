@@ -40,6 +40,10 @@ public class InscricaoEvento {
     @Column(name = "data_inscricao")
     private LocalDateTime dataInscricao;
 
+    /** Colocação final no evento, lançada pelo organizador depois da competição (nula até lá). */
+    @Column(name = "colocacao")
+    private Integer colocacao;
+
     @PrePersist
     protected void onCreate() {
         if (this.dataInscricao == null) {

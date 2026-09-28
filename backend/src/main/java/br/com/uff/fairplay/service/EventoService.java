@@ -4,18 +4,25 @@ import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
+import br.com.uff.fairplay.dto.LancarResultadosDTO;
+import br.com.uff.fairplay.dto.ResultadoEventoDTO;
+import br.com.uff.fairplay.dto.ResultadoInscricaoLoteDTO;
 import br.com.uff.fairplay.exception.AcessoNegadoException;
 import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
 import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.*;
 import br.com.uff.fairplay.repository.*;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import br.com.uff.fairplay.service.RegrasElegibilidade.CriteriosEvento;
+import br.com.uff.fairplay.service.RegrasElegibilidade.ResultadoAuditoria;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class EventoService {
@@ -26,37 +33,53 @@ public class EventoService {
      */
     private static final long DESLOCAMENTO_ID_HISTORICO = 100000L;
 
+    /** Máximo de CPFs aceitos numa única importação de planilha. */
+    private static final int LIMITE_INSCRICAO_EM_LOTE = 2000;
+
+    private static final Set<String> FORMATOS = Set.of("Individual", "Dupla", "Trio", "Time");
+    private static final Set<String> GENEROS_CATEGORIA = Set.of("Masculino", "Feminino", "Misto");
+
     private final EventoRepository eventoRepository;
     private final CategoriaEventoRepository categoriaEventoRepository;
     private final InscricaoEventoRepository inscricaoEventoRepository;
     private final AtletaRepository atletaRepository;
     private final ResultadoCampeonatoRepository resultadoCampeonatoRepository;
     private final HistoricoAtletaRepository historicoAtletaRepository;
-    private final PasswordEncoder passwordEncoder;
 
     public EventoService(EventoRepository eventoRepository,
                          CategoriaEventoRepository categoriaEventoRepository,
                          InscricaoEventoRepository inscricaoEventoRepository,
                          AtletaRepository atletaRepository,
                          ResultadoCampeonatoRepository resultadoCampeonatoRepository,
-                         HistoricoAtletaRepository historicoAtletaRepository,
-                         PasswordEncoder passwordEncoder) {
+                         HistoricoAtletaRepository historicoAtletaRepository) {
         this.eventoRepository = eventoRepository;
         this.categoriaEventoRepository = categoriaEventoRepository;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.atletaRepository = atletaRepository;
         this.resultadoCampeonatoRepository = resultadoCampeonatoRepository;
         this.historicoAtletaRepository = historicoAtletaRepository;
-        this.passwordEncoder = passwordEncoder;
     }
 
     // ---------------------------------------------------------------- Eventos e categorias
 
     @Transactional
     public Evento criarEvento(CriarEventoDTO dto, Long organizadorId) {
+        if (dto.nome() == null || dto.nome().trim().length() < 3) {
+            throw new RegraNegocioException("Informe um nome com pelo menos 3 letras para o evento.");
+        }
+        if (dto.dataInicio() == null) {
+            throw new RegraNegocioException("Informe a data de início do evento.");
+        }
+        if (dto.dataFim() != null && dto.dataFim().isBefore(dto.dataInicio())) {
+            throw new RegraNegocioException("A data de término não pode ser anterior à de início.");
+        }
+        if (dto.categorias() == null || dto.categorias().isEmpty()) {
+            throw new RegraNegocioException("Adicione pelo menos uma categoria ao evento.");
+        }
+
         Evento evento = new Evento();
         evento.setOrganizadorId(organizadorId);
-        evento.setNome(dto.nome());
+        evento.setNome(dto.nome().trim());
         evento.setDataInicio(dto.dataInicio());
         evento.setDataFim(dto.dataFim());
         evento.setLocalizacao(dto.localizacao());
@@ -64,10 +87,8 @@ public class EventoService {
         evento.setRegraTresPodiosSobe(dto.regraTresPodiosSobe());
         evento.setRegraTresParticipacoesSobe(dto.regraTresParticipacoesSobe());
 
-        if (dto.categorias() != null) {
-            for (CriarCategoriaDTO catDto : dto.categorias()) {
-                evento.getCategorias().add(novaCategoria(evento, catDto));
-            }
+        for (CriarCategoriaDTO catDto : dto.categorias()) {
+            evento.getCategorias().add(novaCategoria(evento, catDto));
         }
 
         return eventoRepository.save(evento);
@@ -134,11 +155,16 @@ public class EventoService {
     }
 
     private CategoriaEvento novaCategoria(Evento evento, CriarCategoriaDTO dto) {
+        CategoriaCompeticao nivel = CategoriaCompeticao.fromString(dto.nivel());
+        if (!FORMATOS.contains(dto.formato()) || !GENEROS_CATEGORIA.contains(dto.genero()) || nivel == null) {
+            throw new RegraNegocioException("Categoria inválida: informe formato, gênero e nível entre as opções disponíveis.");
+        }
+
         CategoriaEvento categoria = new CategoriaEvento();
         categoria.setEvento(evento);
         categoria.setFormato(dto.formato());
         categoria.setGenero(dto.genero());
-        categoria.setNivel(CategoriaCompeticao.fromString(dto.nivel()));
+        categoria.setNivel(nivel);
         return categoria;
     }
 
@@ -148,20 +174,59 @@ public class EventoService {
     public InscricaoEvento inscreverAtleta(InscreverAtletaDTO dto, Long organizadorId) {
         CategoriaEvento categoria = buscarCategoriaDoOrganizador(dto.categoriaEventoId(), organizadorId);
 
-        Atleta atleta = dto.atletaId() != null && dto.atletaId() > DESLOCAMENTO_ID_HISTORICO
+        if (dto.atletaId() == null) {
+            throw new RegraNegocioException("Informe o atleta a inscrever.");
+        }
+        Atleta atleta = dto.atletaId() > DESLOCAMENTO_ID_HISTORICO
                 ? obterAtletaDoHistorico(dto.atletaId() - DESLOCAMENTO_ID_HISTORICO, categoria)
                 : obterAtletaCadastrado(dto.atletaId(), categoria);
 
-        if (inscricaoEventoRepository.existsByCategoriaEventoIdAndAtletaId(categoria.getId(), atleta.getId())) {
-            throw new RegraNegocioException("Este atleta já está inscrito nesta categoria.");
+        return criarInscricao(categoria, atleta);
+    }
+
+    /**
+     * Inscreve na categoria os atletas cadastrados com os CPFs informados (vindos de uma planilha).
+     * Cada CPF é tratado de forma independente: os válidos são inscritos e os demais voltam
+     * na lista de falhas com o motivo, sem impedir os outros.
+     */
+    @Transactional
+    public ResultadoInscricaoLoteDTO inscreverEmLote(Long categoriaId, List<String> cpfs, Long organizadorId) {
+        CategoriaEvento categoria = buscarCategoriaDoOrganizador(categoriaId, organizadorId);
+
+        if (cpfs == null || cpfs.isEmpty()) {
+            throw new RegraNegocioException("Nenhum CPF foi enviado.");
+        }
+        if (cpfs.size() > LIMITE_INSCRICAO_EM_LOTE) {
+            throw new RegraNegocioException("Envie no máximo " + LIMITE_INSCRICAO_EM_LOTE + " CPFs por vez.");
         }
 
-        InscricaoEvento inscricao = new InscricaoEvento();
-        inscricao.setCategoriaEvento(categoria);
-        inscricao.setAtleta(atleta);
-        aplicarAuditoria(inscricao, auditarElegibilidade(atleta, categoria));
+        List<String> cpfsDistintos = cpfs.stream().map(EventoService::apenasDigitos).distinct().toList();
+        List<String> cpfsValidos = cpfsDistintos.stream().filter(c -> c.length() == 11).toList();
 
-        return inscricaoEventoRepository.save(inscricao);
+        Map<String, Atleta> atletasPorCpf = cpfsValidos.isEmpty() ? Map.of()
+                : atletaRepository.buscarAtletasPorCpfs(cpfsValidos).stream()
+                        .collect(Collectors.toMap(a -> apenasDigitos(a.getCpf()), a -> a, (a, b) -> a));
+
+        List<InscricaoEvento> inscritos = new ArrayList<>();
+        List<ResultadoInscricaoLoteDTO.Falha> falhas = new ArrayList<>();
+
+        for (String cpf : cpfsDistintos) {
+            Atleta atleta = atletasPorCpf.get(cpf);
+            if (cpf.length() != 11) {
+                falhas.add(new ResultadoInscricaoLoteDTO.Falha(cpf, "CPF inválido (deve ter 11 dígitos)."));
+            } else if (atleta == null) {
+                falhas.add(new ResultadoInscricaoLoteDTO.Falha(cpf, "Nenhum atleta cadastrado com este CPF."));
+            } else {
+                try {
+                    RegrasElegibilidade.validarGenero(atleta.getGenero(), categoria.getGenero());
+                    inscritos.add(criarInscricao(categoria, atleta));
+                } catch (RegraNegocioException e) {
+                    falhas.add(new ResultadoInscricaoLoteDTO.Falha(cpf, e.getMessage()));
+                }
+            }
+        }
+
+        return new ResultadoInscricaoLoteDTO(inscritos, falhas);
     }
 
     @Transactional(readOnly = true)
@@ -177,19 +242,47 @@ public class EventoService {
         inscricaoEventoRepository.delete(inscricao);
     }
 
+    /**
+     * Grava as colocações finais da categoria. Esses resultados passam a fazer parte do histórico
+     * do atleta (painel, recomendação e auditoria de eventos futuros).
+     */
+    @Transactional
+    public List<InscricaoEvento> lancarResultados(Long categoriaId, LancarResultadosDTO dto, Long organizadorId) {
+        CategoriaEvento categoria = buscarCategoriaDoOrganizador(categoriaId, organizadorId);
+        Map<Long, InscricaoEvento> inscricoes = inscricaoEventoRepository.findByCategoriaEventoId(categoria.getId()).stream()
+                .collect(Collectors.toMap(InscricaoEvento::getId, Function.identity()));
+
+        if (dto.resultados() == null) {
+            throw new RegraNegocioException("Nenhum resultado foi enviado.");
+        }
+        for (LancarResultadosDTO.Item item : dto.resultados()) {
+            InscricaoEvento inscricao = inscricoes.get(item.inscricaoId());
+            if (inscricao == null) {
+                throw new RegraNegocioException("Uma das inscrições enviadas não pertence a esta categoria.");
+            }
+            if (item.colocacao() != null && item.colocacao() < 1) {
+                throw new RegraNegocioException("A colocação deve ser um número inteiro a partir de 1.");
+            }
+            inscricao.setColocacao(item.colocacao());
+        }
+
+        return inscricaoEventoRepository.saveAll(inscricoes.values());
+    }
+
     private Atleta obterAtletaCadastrado(Long atletaId, CategoriaEvento categoria) {
         Atleta atleta = atletaRepository.findById(atletaId)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Atleta não encontrado."));
-        if ("ORGANIZADOR".equals(atleta.getPerfil())) {
+        if (Atleta.PERFIL_ORGANIZADOR.equals(atleta.getPerfil())) {
             throw new RegraNegocioException("Organizadores não podem ser inscritos como atletas.");
         }
-        validarCompatibilidadeGenero(atleta, categoria);
+        RegrasElegibilidade.validarGenero(atleta.getGenero(), categoria.getGenero());
         return atleta;
     }
 
     /**
      * Resolve um atleta vindo do histórico importado. Se o registro ainda não tem atleta associado,
-     * cria um atleta com perfil HISTORICO (dados fictícios de contato) e o vincula ao registro.
+     * cria um atleta pendente (perfil HISTORICO) só com nome, gênero e box — sem dados de contato
+     * inventados. A pessoa pode reivindicar esse registro depois, ao se cadastrar.
      */
     private Atleta obterAtletaDoHistorico(Long historicoId, CategoriaEvento categoria) {
         HistoricoAtleta historico = historicoAtletaRepository.findById(historicoId)
@@ -200,48 +293,35 @@ public class EventoService {
                     .orElseThrow(() -> new RecursoNaoEncontradoException("Atleta vinculado não encontrado."));
         }
 
-        // O histórico não tem gênero: assume o da categoria alvo para não gravar um gênero incompatível
+        // O histórico não informa o gênero: usa o da categoria em que o atleta está sendo inscrito
         String genero = categoria.getGenero() != null && categoria.getGenero().toUpperCase().contains("FEM")
                 ? "FEMININO"
                 : "MASCULINO";
 
-        Atleta novoAtleta = new Atleta();
-        novoAtleta.setNomeCompleto(historico.getNomeAtleta());
-        novoAtleta.setDataNascimento(LocalDate.of(2000, 1, 1));
-        novoAtleta.setGenero(genero);
-        novoAtleta.setCelular(String.format("(00) 9%04d-%04d", historicoId / 10000, historicoId % 10000));
-        novoAtleta.setEmail("historico_" + historicoId + "@fairplay.com");
-        novoAtleta.setSenha(passwordEncoder.encode("123456"));
-        novoAtleta.setCidade("Niterói");
-        novoAtleta.setEstado("RJ");
-        novoAtleta.setNomeBox(historico.getBoxOrigem() != null ? historico.getBoxOrigem() : "Sem Box");
-        novoAtleta.setPerfil("HISTORICO");
+        Atleta pendente = new Atleta();
+        pendente.setNomeCompleto(historico.getNomeAtleta());
+        pendente.setGenero(genero);
+        pendente.setNomeBox(historico.getBoxOrigem() != null ? historico.getBoxOrigem() : "Sem Box");
+        pendente.setPerfil(Atleta.PERFIL_HISTORICO);
 
-        validarCompatibilidadeGenero(novoAtleta, categoria);
-
-        Atleta salvo = atletaRepository.save(novoAtleta);
+        Atleta salvo = atletaRepository.save(pendente);
         historico.setAtletaId(salvo.getId());
         historicoAtletaRepository.save(historico);
         return salvo;
     }
 
-    private void validarCompatibilidadeGenero(Atleta atleta, CategoriaEvento categoria) {
-        String generoCategoria = categoria.getGenero() != null ? categoria.getGenero().trim().toUpperCase() : "";
-        String generoAtleta = atleta.getGenero() != null ? atleta.getGenero().trim().toUpperCase() : "";
-
-        if (generoCategoria.contains("MIST")) {
-            return;
+    /** Cria a inscrição já auditada; recusa se o atleta já estiver inscrito na categoria. */
+    private InscricaoEvento criarInscricao(CategoriaEvento categoria, Atleta atleta) {
+        if (inscricaoEventoRepository.existsByCategoriaEventoIdAndAtletaId(categoria.getId(), atleta.getId())) {
+            throw new RegraNegocioException("Este atleta já está inscrito nesta categoria.");
         }
 
-        boolean atletaMasculino = generoAtleta.startsWith("M") || generoAtleta.contains("MASC");
-        boolean atletaFeminino = generoAtleta.startsWith("F") || generoAtleta.contains("FEM");
+        InscricaoEvento inscricao = new InscricaoEvento();
+        inscricao.setCategoriaEvento(categoria);
+        inscricao.setAtleta(atleta);
+        aplicarAuditoria(inscricao, auditarElegibilidade(atleta, categoria));
 
-        if (generoCategoria.contains("MASC") && !atletaMasculino) {
-            throw new RegraNegocioException("Atletas do sexo feminino não podem ser inscritos em categorias masculinas.");
-        }
-        if (generoCategoria.contains("FEM") && !atletaFeminino) {
-            throw new RegraNegocioException("Atletas do sexo masculino não podem ser inscritos em categorias femininas.");
-        }
+        return inscricaoEventoRepository.save(inscricao);
     }
 
     // ---------------------------------------------------------------- Auditoria de elegibilidade
@@ -252,54 +332,30 @@ public class EventoService {
         inscricao.setMotivoIrregularidade(auditoria.motivo());
     }
 
-    /**
-     * Verifica o histórico do atleta (resultados lançados + histórico importado) contra os critérios
-     * de promoção ativos no evento. Cada critério violado vira uma infração.
-     */
     private ResultadoAuditoria auditarElegibilidade(Atleta atleta, CategoriaEvento categoriaAlvo) {
         Evento evento = categoriaAlvo.getEvento();
-        CategoriaCompeticao nivelInscrito = categoriaAlvo.getNivel();
-        List<Participacao> participacoes = buscarParticipacoes(atleta);
-        List<String> infracoes = new ArrayList<>();
-
-        if (evento.isRegraCampeaoSobe()) {
-            boolean jaFoiCampeaoAquiOuAcima = participacoes.stream()
-                    .anyMatch(p -> p.colocacao() == 1 && p.categoria().ordinal() >= nivelInscrito.ordinal());
-            if (jaFoiCampeaoAquiOuAcima) {
-                infracoes.add("Já conquistou o 1º lugar na categoria " + nivelInscrito.getDescricao() + " ou superior.");
-            }
-        }
-
-        if (evento.isRegraTresPodiosSobe()) {
-            long podios = participacoes.stream()
-                    .filter(p -> p.categoria() == nivelInscrito && p.colocacao() <= 3)
-                    .count();
-            if (podios >= 3) {
-                infracoes.add("Possui " + podios + " pódios na categoria " + nivelInscrito.getDescricao() + " (limite: 3).");
-            }
-        }
-
-        if (evento.isRegraTresParticipacoesSobe()) {
-            long vezes = participacoes.stream()
-                    .filter(p -> p.categoria() == nivelInscrito)
-                    .count();
-            if (vezes >= 3) {
-                infracoes.add("Já participou " + vezes + " vezes da categoria " + nivelInscrito.getDescricao() + ".");
-            }
-        }
-
-        if (infracoes.isEmpty()) {
-            return new ResultadoAuditoria("REGULAR", nivelInscrito.getDescricao(), "Atleta cumpre todos os critérios definidos.");
-        }
-        return new ResultadoAuditoria("IRREGULAR", proximoNivel(nivelInscrito).getDescricao(), String.join(" | ", infracoes));
+        CriteriosEvento criterios = new CriteriosEvento(
+                evento.isRegraCampeaoSobe(), evento.isRegraTresPodiosSobe(), evento.isRegraTresParticipacoesSobe());
+        return RegrasElegibilidade.auditar(categoriaAlvo.getNivel(), criterios, buscarParticipacoes(atleta, evento.getId()));
     }
 
-    private List<Participacao> buscarParticipacoes(Atleta atleta) {
+    /**
+     * Participações do atleta consideradas na auditoria: resultados lançados manualmente, colocações em
+     * outros eventos do FairPlay (o próprio evento auditado fica de fora) e o histórico importado
+     * (vinculado ou com o mesmo nome).
+     */
+    private List<Participacao> buscarParticipacoes(Atleta atleta, Long eventoAuditadoId) {
         List<Participacao> participacoes = new ArrayList<>();
 
         for (ResultadoCampeonato r : resultadoCampeonatoRepository.findByAtletaIdOrderByDataCampeonatoDesc(atleta.getId())) {
             if (r.getCategoria() != null && r.getColocacao() != null) {
                 participacoes.add(new Participacao(r.getCategoria(), r.getColocacao()));
+            }
+        }
+
+        for (ResultadoEventoDTO r : inscricaoEventoRepository.buscarResultadosDoAtleta(atleta.getId())) {
+            if (!r.eventoId().equals(eventoAuditadoId) && r.nivel() != null) {
+                participacoes.add(new Participacao(r.nivel(), r.colocacao()));
             }
         }
 
@@ -313,14 +369,7 @@ public class EventoService {
         return participacoes;
     }
 
-    /** Próximo nível na ordem do enum (ELITE sobe para MASTER; MASTER permanece). */
-    private CategoriaCompeticao proximoNivel(CategoriaCompeticao nivelAtual) {
-        CategoriaCompeticao[] niveis = CategoriaCompeticao.values();
-        int proximo = nivelAtual.ordinal() + 1;
-        return proximo < niveis.length ? niveis[proximo] : nivelAtual;
+    private static String apenasDigitos(String valor) {
+        return valor == null ? "" : valor.replaceAll("\\D", "");
     }
-
-    private record Participacao(CategoriaCompeticao categoria, int colocacao) {}
-
-    private record ResultadoAuditoria(String status, String categoriaRecomendada, String motivo) {}
 }

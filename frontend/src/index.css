@@ -1,3 +1,7 @@
+/* Estilos globais e classes compartilhadas entre as telas.
+   Os estilos específicos de cada tela continuam junto do componente (objetos `styles`);
+   aqui ficam as peças reutilizadas e o layout responsivo (que precisa de media queries). */
+
 :root {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   color-scheme: dark;
@@ -14,11 +18,236 @@
 body {
   min-height: 100vh;
   background: #080a0c;
-  display: flex;
-  justify-content: center;
-  align-items: center;
 }
 
 #root {
   width: 100%;
+}
+
+/* ---------------------------------------------------------------- Modal */
+
+.modal-fundo {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.82);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  padding: 16px;
+}
+
+.modal {
+  background-color: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.9);
+}
+
+.modal-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.modal-titulo {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.modal-fechar {
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.modal-acoes {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* ---------------------------------------------------------------- Alertas e botões */
+
+.alerta {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-size: 0.84rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.botao {
+  padding: 9px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.botao:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.botao-secundario { background: transparent; border-color: #30363d; color: #cbd5e0; }
+.botao-azul { background: #00bfff; color: #000000; font-weight: 800; }
+.botao-verde { background: #238636; color: #ffffff; }
+.botao-perigo { background: #da3633; color: #ffffff; font-weight: 800; }
+.botao-contorno-azul { background: transparent; border: 1px dashed #00bfff; color: #00bfff; }
+
+.link-botao {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- Formulários */
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.campo-rotulo {
+  font-size: 0.72rem;
+  color: #a0aec0;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.campo-entrada {
+  padding: 11px 13px;
+  border-radius: 8px;
+  background-color: #0a0c0e;
+  border: 1px solid #2d3748;
+  color: #ffffff;
+  font-size: 0.9rem;
+  outline: none;
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------- Layouts responsivos */
+
+/* Telas de login e cadastro: banner à esquerda e formulário à direita */
+.tela-acesso {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px 16px;
+}
+
+.cartao-acesso {
+  display: flex;
+  width: 100%;
+  background-color: #111418;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid #22272e;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+.cartao-acesso-banner {
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: flex-end;
+  transition: background-image 0.3s ease-in-out;
+}
+
+.cartao-acesso-formulario {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Linha de campos lado a lado no formulário */
+.linha-campos {
+  display: flex;
+  gap: 12px;
+}
+
+/* Barra superior dos painéis */
+.barra-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 36px;
+  background-color: #111418;
+  border-bottom: 1px solid #22272e;
+}
+
+.barra-topo-acoes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* Painel do organizador: lista de eventos à esquerda e gestão à direita */
+.painel-organizador {
+  display: flex;
+  min-height: calc(100vh - 67px);
+}
+
+.painel-organizador-lateral {
+  width: 300px;
+  flex-shrink: 0;
+}
+
+.painel-organizador-conteudo {
+  flex: 1;
+  min-width: 0;
+  padding: 32px 40px;
+}
+
+.conteudo-central {
+  max-width: 1050px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.linha-ferramentas {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tabela-rolavel {
+  overflow-x: auto;
+}
+
+@media (max-width: 800px) {
+  .cartao-acesso { flex-direction: column; height: auto !important; }
+  .cartao-acesso-banner { display: none; }
+  .cartao-acesso-formulario { padding: 24px 20px !important; }
+  .linha-campos { flex-direction: column; }
+  .barra-topo { padding: 12px 16px; }
+  .painel-organizador { flex-direction: column; }
+  .painel-organizador-lateral { width: 100%; border-right: none !important; border-bottom: 1px solid #22272e; }
+  .painel-organizador-conteudo { padding: 20px 16px; }
+  .conteudo-central { padding: 20px 14px; }
+  .modal { padding: 18px; }
 }

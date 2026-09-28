@@ -1,0 +1,7 @@
+# Migrações do banco, aplicadas automaticamente pelo Liquibase ao iniciar o backend, em ordem.
+# Nunca altere um arquivo já aplicado: crie um novo e inclua abaixo.
+databaseChangeLog:
+  - include:
+      file: db/changelog/001-esquema-inicial.sql
+  - include:
+      file: db/changelog/002-resultados-senhas-historico.sql

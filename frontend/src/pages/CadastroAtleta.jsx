@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import api, { mensagemDeErro } from '../api';
-import { mascaraCpf, mascaraCelular, mascaraData, dataBrParaIso } from '../utils/formatacao';
+import { mascaraCpf, mascaraCelular, mascaraData, dataBrParaIso, cpfValido, TAMANHO_MINIMO_SENHA } from '../utils/formatacao';
 import { corDoPerfil, imagemDoPerfil, estiloFeedback } from '../tema';
 
 const PERFIS = ['ATLETA', 'ORGANIZADOR'];
@@ -91,6 +91,16 @@ export default function CadastroAtleta() {
     e.preventDefault();
     setErro('');
 
+    if (!cpfValido(formData.cpf)) {
+      setErro('CPF inválido. Confira os números digitados.');
+      return;
+    }
+
+    if (formData.senha.length < TAMANHO_MINIMO_SENHA) {
+      setErro(`A senha deve ter pelo menos ${TAMANHO_MINIMO_SENHA} caracteres.`);
+      return;
+    }
+
     if (formData.senha !== formData.confirmarSenha) {
       setErro('A confirmação de senha não confere.');
       return;
@@ -128,10 +138,10 @@ export default function CadastroAtleta() {
   };
 
   return (
-    <div style={styles.pageWrapper}>
-      <div style={styles.cardContainer}>
+    <div className="tela-acesso">
+      <div className="cartao-acesso" style={styles.cardContainer}>
         {/* Banner lateral */}
-        <div style={{ ...styles.imageBanner, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
+        <div className="cartao-acesso-banner" style={{ ...styles.imageBanner, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
           <div style={styles.overlay}>
             <h2 style={{ ...styles.bannerTitle, color: accentColor }}>FAIRPLAY</h2>
             <p style={styles.bannerText}>
@@ -143,7 +153,7 @@ export default function CadastroAtleta() {
         </div>
 
         {/* Formulário */}
-        <div style={styles.formSection}>
+        <div className="cartao-acesso-formulario" style={styles.formSection}>
           <div style={styles.tabContainer}>
             {PERFIS.map((perfil) => {
               const ativo = tipoUsuario === perfil;
@@ -236,7 +246,7 @@ export default function CadastroAtleta() {
               </div>
             )}
 
-            <div style={styles.row}>
+            <div className="linha-campos">
               <div style={styles.inputGroup}>
                 <label style={styles.label}>CPF</label>
                 <input
@@ -266,7 +276,7 @@ export default function CadastroAtleta() {
               </div>
             </div>
 
-            <div style={styles.row}>
+            <div className="linha-campos">
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Data de Nascimento (DD/MM/AAAA)</label>
                 <input
@@ -298,7 +308,7 @@ export default function CadastroAtleta() {
               </div>
             </div>
 
-            <div style={styles.row}>
+            <div className="linha-campos">
               <div style={{ ...styles.inputGroup, flex: 2 }}>
                 <label style={styles.label}>Cidade</label>
                 <input
@@ -353,7 +363,7 @@ export default function CadastroAtleta() {
               />
             </div>
 
-            <div style={styles.row}>
+            <div className="linha-campos">
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Senha</label>
                 <input
@@ -408,34 +418,12 @@ export default function CadastroAtleta() {
 }
 
 const styles = {
-  pageWrapper: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '100vh',
-    width: '100%',
-    padding: '24px 16px',
-  },
   cardContainer: {
-    display: 'flex',
-    width: '100%',
     maxWidth: '1020px',
     height: '740px',
-    backgroundColor: '#111418',
-    borderRadius: '16px',
-    overflow: 'hidden',
-    border: '1px solid #22272e',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
   },
   imageBanner: {
     flex: '0.9',
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'flex-end',
-    height: '100%',
-    transition: 'background-image 0.3s ease-in-out',
   },
   overlay: {
     padding: '40px 32px',
@@ -458,9 +446,6 @@ const styles = {
   formSection: {
     flex: '1.2',
     padding: '36px 44px',
-    display: 'flex',
-    flexDirection: 'column',
-    overflowY: 'auto',
   },
   tabContainer: {
     display: 'flex',
@@ -496,10 +481,6 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '14px',
-  },
-  row: {
-    display: 'flex',
-    gap: '12px',
   },
   inputGroup: {
     display: 'flex',

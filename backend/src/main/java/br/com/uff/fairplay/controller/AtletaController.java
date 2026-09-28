@@ -4,17 +4,22 @@ import br.com.uff.fairplay.dto.AtualizarPerfilAtletaDTO;
 import br.com.uff.fairplay.dto.CadastroAtletaDTO;
 import br.com.uff.fairplay.dto.DashboardAtletaDTO;
 import br.com.uff.fairplay.dto.LoginDTO;
+import br.com.uff.fairplay.dto.MinhaInscricaoDTO;
 import br.com.uff.fairplay.exception.AcessoNegadoException;
 import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
+import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.Atleta;
 import br.com.uff.fairplay.model.CategoriaCompeticao;
 import br.com.uff.fairplay.model.ResultadoCampeonato;
 import br.com.uff.fairplay.repository.AtletaRepository;
 import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
+import br.com.uff.fairplay.repository.InscricaoEventoRepository;
 import br.com.uff.fairplay.repository.ResultadoCampeonatoRepository;
 import br.com.uff.fairplay.security.SessaoService;
 import br.com.uff.fairplay.security.UsuarioLogado;
 import br.com.uff.fairplay.service.RecomendacaoCategoriaService;
+import br.com.uff.fairplay.service.ValidacaoCadastro;
+import br.com.uff.fairplay.service.ValidacaoCadastro.DadosCadastro;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,14 +36,14 @@ import java.util.Optional;
 @RequestMapping("/api/atletas")
 public class AtletaController {
 
-    private static final String PERFIL_PADRAO = "ATLETA";
     /** Perfis que podem fazer login por esta rota (o admin master tem login próprio). */
-    private static final List<String> PERFIS_COM_LOGIN = List.of("ATLETA", "ORGANIZADOR");
+    private static final List<String> PERFIS_COM_LOGIN = List.of(Atleta.PERFIL_ATLETA, Atleta.PERFIL_ORGANIZADOR);
 
     private final AtletaRepository atletaRepository;
     private final ResultadoCampeonatoRepository resultadoRepository;
     private final RecomendacaoCategoriaService recomendacaoCategoriaService;
     private final HistoricoAtletaRepository historicoAtletaRepository;
+    private final InscricaoEventoRepository inscricaoEventoRepository;
     private final PasswordEncoder passwordEncoder;
     private final SessaoService sessaoService;
 
@@ -46,53 +51,61 @@ public class AtletaController {
                             ResultadoCampeonatoRepository resultadoRepository,
                             RecomendacaoCategoriaService recomendacaoCategoriaService,
                             HistoricoAtletaRepository historicoAtletaRepository,
+                            InscricaoEventoRepository inscricaoEventoRepository,
                             PasswordEncoder passwordEncoder,
                             SessaoService sessaoService) {
         this.atletaRepository = atletaRepository;
         this.resultadoRepository = resultadoRepository;
         this.recomendacaoCategoriaService = recomendacaoCategoriaService;
         this.historicoAtletaRepository = historicoAtletaRepository;
+        this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.passwordEncoder = passwordEncoder;
         this.sessaoService = sessaoService;
     }
 
-    /** Cadastra atleta ou organizador. CPF, e-mail e celular são únicos por perfil. */
+    /**
+     * Cadastra atleta ou organizador. CPF, e-mail e celular são únicos por perfil.
+     * Se o atleta vincular um histórico que já tem um atleta pendente (criado quando alguém o inscreveu
+     * num evento), esse registro vira a conta dele — e as inscrições feitas antes passam a ser suas.
+     */
     @PostMapping("/cadastro")
     @Transactional
     public ResponseEntity<?> cadastrarAtleta(@RequestBody CadastroAtletaDTO dto) {
-        String perfil = dto.perfil() != null ? dto.perfil() : PERFIL_PADRAO;
-        String perfilNome = nomeDoPerfil(perfil);
+        DadosCadastro dados = ValidacaoCadastro.validar(dto);
+        String perfilNome = nomeDoPerfil(dados.perfil());
 
-        if (dto.senha() == null || dto.senha().isBlank()) {
-            return ResponseEntity.badRequest().body("Informe uma senha.");
-        }
-        if (atletaRepository.existsByCpfAndPerfil(dto.cpf(), perfil)) {
+        if (atletaRepository.existsByCpfAndPerfil(dados.cpf(), dados.perfil())) {
             return ResponseEntity.badRequest().body("Este CPF já está cadastrado como " + perfilNome + ".");
         }
-        if (atletaRepository.existsByEmailAndPerfil(dto.email(), perfil)) {
+        if (atletaRepository.existsByEmailAndPerfil(dados.email(), dados.perfil())) {
             return ResponseEntity.badRequest().body("Este E-mail já está cadastrado como " + perfilNome + ".");
         }
-        if (atletaRepository.existsByCelularAndPerfil(dto.celular(), perfil)) {
+        if (atletaRepository.existsByCelularAndPerfil(dados.celular(), dados.perfil())) {
             return ResponseEntity.badRequest().body("Este Celular já está cadastrado como " + perfilNome + ".");
         }
 
-        Atleta atleta = new Atleta();
-        atleta.setNomeCompleto(dto.nomeCompleto());
-        atleta.setCpf(dto.cpf());
-        atleta.setDataNascimento(dto.dataNascimento());
-        atleta.setGenero(dto.genero());
-        atleta.setCelular(dto.celular());
-        atleta.setEmail(dto.email());
-        atleta.setSenha(passwordEncoder.encode(dto.senha()));
-        atleta.setCidade(dto.cidade());
-        atleta.setEstado(dto.estado());
-        atleta.setNomeBox(dto.nomeBox());
-        atleta.setPerfil(perfil);
+        String historicoNome = dto.historicoNomeAtleta() != null ? dto.historicoNomeAtleta().trim() : "";
+        boolean vinculaHistorico = Atleta.PERFIL_ATLETA.equals(dados.perfil()) && !historicoNome.isEmpty();
+
+        Atleta atleta = vinculaHistorico
+                ? atletaRepository.buscarPendenteDoHistorico(historicoNome).orElseGet(Atleta::new)
+                : new Atleta();
+        atleta.setNomeCompleto(dados.nomeCompleto());
+        atleta.setCpf(dados.cpf());
+        atleta.setDataNascimento(dados.dataNascimento());
+        atleta.setGenero(dados.genero());
+        atleta.setCelular(dados.celular());
+        atleta.setEmail(dados.email());
+        atleta.setSenha(passwordEncoder.encode(dados.senha()));
+        atleta.setCidade(dados.cidade());
+        atleta.setEstado(dados.estado());
+        atleta.setNomeBox(dados.nomeBox());
+        atleta.setPerfil(dados.perfil());
 
         Atleta salvo = atletaRepository.save(atleta);
 
-        if (dto.historicoNomeAtleta() != null && !dto.historicoNomeAtleta().isBlank()) {
-            historicoAtletaRepository.vincularHistoricoAoAtleta(salvo.getId(), dto.historicoNomeAtleta().trim());
+        if (vinculaHistorico) {
+            historicoAtletaRepository.vincularHistoricoAoAtleta(salvo.getId(), historicoNome);
         }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(salvo);
@@ -101,7 +114,7 @@ public class AtletaController {
     /** Login por e-mail ou CPF (com ou sem pontuação) dentro do perfil escolhido. Devolve o token da sessão. */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginDTO dto) {
-        String perfil = dto.perfil() != null ? dto.perfil() : PERFIL_PADRAO;
+        String perfil = dto.perfil() != null ? dto.perfil() : Atleta.PERFIL_ATLETA;
         String login = dto.login() != null ? dto.login().trim() : "";
 
         Optional<Atleta> encontrado = PERFIS_COM_LOGIN.contains(perfil) ? buscarPorLogin(login, perfil) : Optional.empty();
@@ -112,7 +125,7 @@ public class AtletaController {
         }
 
         Atleta atleta = encontrado.get();
-        if (dto.senha() == null || !passwordEncoder.matches(dto.senha(), atleta.getSenha())) {
+        if (dto.senha() == null || atleta.getSenha() == null || !passwordEncoder.matches(dto.senha(), atleta.getSenha())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Senha incorreta.");
         }
 
@@ -129,6 +142,13 @@ public class AtletaController {
     public ResponseEntity<DashboardAtletaDTO> getDashboard(@PathVariable Long id, @AuthenticationPrincipal UsuarioLogado usuario) {
         exigirProprioAtleta(id, usuario);
         return ResponseEntity.ok(recomendacaoCategoriaService.obterDashboard(id));
+    }
+
+    /** Eventos em que o atleta está inscrito, com o resultado da auditoria e a colocação (se lançada). */
+    @GetMapping("/{id}/inscricoes")
+    public ResponseEntity<List<MinhaInscricaoDTO>> minhasInscricoes(@PathVariable Long id, @AuthenticationPrincipal UsuarioLogado usuario) {
+        exigirProprioAtleta(id, usuario);
+        return ResponseEntity.ok(inscricaoEventoRepository.buscarInscricoesDoAtleta(id));
     }
 
     /** Lança manualmente um resultado de campeonato para o atleta. Só o administrador (não usado pelo frontend). */
@@ -153,9 +173,15 @@ public class AtletaController {
         Atleta atleta = buscarAtleta(id);
 
         if (dto.nomeCompleto() != null && !dto.nomeCompleto().isBlank()) {
+            if (dto.nomeCompleto().trim().length() < 3) {
+                throw new RegraNegocioException("Informe o nome completo.");
+            }
             atleta.setNomeCompleto(dto.nomeCompleto().trim());
         }
         if (dto.nomeBox() != null && !dto.nomeBox().isBlank()) {
+            if (dto.nomeBox().trim().length() > 100) {
+                throw new RegraNegocioException("O nome do box deve ter até 100 caracteres.");
+            }
             atleta.setNomeBox(dto.nomeBox().trim());
         }
 
@@ -181,7 +207,7 @@ public class AtletaController {
     }
 
     private Optional<Atleta> buscarPorLogin(String login, String perfil) {
-        Optional<Atleta> atleta = atletaRepository.findByEmailAndPerfil(login, perfil)
+        Optional<Atleta> atleta = atletaRepository.findByEmailIgnoreCaseAndPerfil(login, perfil)
                 .or(() -> atletaRepository.findByCpfAndPerfil(login, perfil));
         if (atleta.isPresent()) {
             return atleta;
@@ -190,13 +216,12 @@ public class AtletaController {
         // CPF digitado só com números: tenta no formato salvo (000.000.000-00)
         String digitos = login.replaceAll("\\D", "");
         if (digitos.length() == 11) {
-            String cpfFormatado = digitos.replaceAll("(\\d{3})(\\d{3})(\\d{3})(\\d{2})", "$1.$2.$3-$4");
-            return atletaRepository.findByCpfAndPerfil(cpfFormatado, perfil);
+            return atletaRepository.findByCpfAndPerfil(ValidacaoCadastro.formatarCpf(digitos), perfil);
         }
         return Optional.empty();
     }
 
     private static String nomeDoPerfil(String perfil) {
-        return perfil.equalsIgnoreCase("ORGANIZADOR") ? "Organizador" : "Atleta";
+        return perfil.equalsIgnoreCase(Atleta.PERFIL_ORGANIZADOR) ? "Organizador" : "Atleta";
     }
 }

@@ -27,7 +27,7 @@ import java.util.List;
 public class SecurityConfig {
 
     /**
-     * Rotas públicas: login, cadastro e sugestões do histórico (usadas antes de existir conta).
+     * Rotas públicas: login, cadastro, sugestões do histórico e recuperação de senha (usadas sem conta ou sem login).
      * As demais exigem o token de sessão do perfil correspondente.
      */
     @Bean
@@ -48,6 +48,8 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/atletas/login", "/api/atletas/cadastro", "/api/admin/usuarios/login").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/atletas/historico/sugestoes").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/conta/recuperar-senha", "/api/conta/redefinir-senha").permitAll()
+                .requestMatchers("/api/conta/**").hasAnyRole("ATLETA", "ORGANIZADOR")
                 .requestMatchers("/api/sessao/**").authenticated()
                 .requestMatchers("/api/admin/**").hasRole("MASTER_ADMIN")
                 .requestMatchers("/api/eventos/**").hasRole("ORGANIZADOR")
