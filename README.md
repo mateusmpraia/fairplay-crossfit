@@ -70,6 +70,44 @@ Acesse http://localhost:5173.
 > `-Djavax.net.ssl.trustStoreType=Windows-ROOT` ao comando, por exemplo
 > `./mvnw -Djavax.net.ssl.trustStoreType=Windows-ROOT spring-boot:run`. Isso faz o Java usar os certificados do Windows.
 
+## Colocar no ar (ambiente de testes)
+
+Sugestão: **backend e MySQL no Railway** e **frontend na Vercel**, ambos publicando a partir do GitHub.
+O projeto já tem o que essas plataformas precisam: `backend/Dockerfile` e `frontend/vercel.json`
+(e `frontend/public/_redirects`, caso use a Netlify).
+
+### 1. Banco de dados (MySQL 8 no Railway ou outro provedor)
+
+Leve os dados atuais para o banco da nuvem com o dump do MySQL local:
+
+```bash
+mysqldump -u root -p --single-transaction fairplay_tcc > fairplay_tcc.sql
+mysql -h HOST -P PORTA -u USUARIO -p NOME_DO_BANCO < fairplay_tcc.sql
+```
+
+O dump inclui a tabela de controle do Liquibase, então o backend reconhece que o banco já está atualizado.
+Com um banco vazio, o backend cria as tabelas sozinho (mas o histórico importado precisa ser carregado à parte).
+
+### 2. Backend (Railway, a partir do `Dockerfile` da pasta `backend`)
+
+| Variável | Exemplo | Observação |
+|---|---|---|
+| `DB_URL` | `jdbc:mysql://HOST:PORTA/NOME_DO_BANCO?useSSL=false&serverTimezone=UTC` | formato JDBC (não o `mysql://` que o Railway mostra) |
+| `DB_USUARIO` / `DB_SENHA` | | credenciais do banco da nuvem |
+| `CORS_ORIGENS` | `https://seu-projeto.vercel.app` | endereço do frontend; vários separados por vírgula |
+| `FAIRPLAY_ADMIN_SENHA` | uma senha forte | **obrigatório trocar**: o padrão `master` gera aviso no log |
+| `FRONTEND_URL` | `https://seu-projeto.vercel.app` | usado no link de recuperação de senha (ainda desativada) |
+
+A porta vem da variável `PORT`, que a plataforma define sozinha.
+
+### 3. Frontend (Vercel, pasta `frontend`)
+
+- *Root directory:* `frontend` · *Build command:* `npm run build` · *Output directory:* `dist`
+- Variável `VITE_API_URL` = endereço do backend + `/api` (ex.: `https://fairplay-backend.up.railway.app/api`).
+  Ela é lida no momento do build: se mudar, publique de novo.
+
+Depois de publicar o frontend, confira se o endereço dele está em `CORS_ORIGENS` no backend.
+
 ## Banco de dados e migrações
 
 As tabelas são criadas e alteradas **apenas** pelas migrações do Liquibase, em

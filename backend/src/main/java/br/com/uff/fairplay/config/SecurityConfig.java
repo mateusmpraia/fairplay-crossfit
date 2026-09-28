@@ -3,6 +3,7 @@ package br.com.uff.fairplay.config;
 import br.com.uff.fairplay.security.FiltroToken;
 import br.com.uff.fairplay.security.SessaoService;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -31,10 +32,11 @@ public class SecurityConfig {
      * As demais exigem o token de sessão do perfil correspondente.
      */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, SessaoService sessaoService) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, SessaoService sessaoService,
+                                                   CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .addFilterBefore(new FiltroToken(sessaoService), UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(e -> e
@@ -65,13 +67,16 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Só o frontend configurado em fairplay.cors.origens (variável CORS_ORIGENS) pode chamar a API pelo navegador.
+     * O login usa token no cabeçalho, não cookies, por isso não há credenciais de navegador.
+     */
     @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource(@Value("${fairplay.cors.origens}") List<String> origens) {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        configuration.setAllowedOrigins(origens.stream().map(String::trim).filter(o -> !o.isEmpty()).toList());
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"));
         configuration.setAllowedHeaders(List.of("*"));
-        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

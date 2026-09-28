@@ -3,6 +3,7 @@ package br.com.uff.fairplay.controller;
 import br.com.uff.fairplay.dto.UsuarioAdminDTO;
 import br.com.uff.fairplay.repository.AtletaRepository;
 import br.com.uff.fairplay.security.SessaoService;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +34,11 @@ public class AdminUsuarioController {
         this.sessaoService = sessaoService;
         this.usuarioAdmin = usuarioAdmin;
         this.senhaAdmin = senhaAdmin;
+
+        if ("master".equals(senhaAdmin)) {
+            LoggerFactory.getLogger(AdminUsuarioController.class).warn(
+                    "Administrador usando a senha padrão \"master\". Defina FAIRPLAY_ADMIN_SENHA antes de colocar o sistema no ar.");
+        }
     }
 
     /** Login do administrador master (credenciais em fairplay.admin.* no application.properties). */
