@@ -74,7 +74,7 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
 
         SELECT
             (MIN(h.id) + 100000) AS id,
-            h.nome_atleta AS nomeCompleto,
+            MIN(h.nome_atleta) AS nomeCompleto,
             NULL AS cpf,
             NULL AS genero,
             NULL AS cidade,
