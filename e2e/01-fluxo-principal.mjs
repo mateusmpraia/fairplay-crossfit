@@ -123,7 +123,10 @@ export default () => executarTeste('fluxo-principal', async (t) => {
   await pill.click();
   await t.clicar('Sim, excluir categoria');
   await page.waitForFunction(() => !document.body.innerText.includes('Individual • Masculino • SCALE'));
-  t.ok('Categoria adicionada e excluída');
+  await page.reload({ waitUntil: 'networkidle0' });
+  await t.esperarTexto('Individual • Feminino • RX');
+  if ((await t.texto()).includes('Individual • Masculino • SCALE')) throw new Error('A categoria excluída voltou depois de recarregar a página');
+  t.ok('Categoria adicionada e excluída (continua excluída depois de recarregar)');
 
   await page.click('span::-p-text(Individual • Feminino • RX)');
   await t.clicar('Excluir atleta');

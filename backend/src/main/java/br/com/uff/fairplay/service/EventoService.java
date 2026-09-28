@@ -126,7 +126,11 @@ public class EventoService {
 
     @Transactional
     public void excluirCategoria(Long categoriaId, Long organizadorId) {
-        categoriaEventoRepository.delete(buscarCategoriaDoOrganizador(categoriaId, organizadorId));
+        CategoriaEvento categoria = buscarCategoriaDoOrganizador(categoriaId, organizadorId);
+        // A categoria sai da lista do evento: como a lista é carregada junto com o evento e salva em cascata,
+        // apagar só a categoria faria o Hibernate desfazer a exclusão ao gravar o evento
+        categoria.getEvento().getCategorias().remove(categoria);
+        categoriaEventoRepository.delete(categoria);
     }
 
     /** Busca o evento e garante que ele pertence ao organizador logado. */
