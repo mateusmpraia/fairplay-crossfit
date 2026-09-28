@@ -11,51 +11,17 @@ const PERFIS = ['ATLETA', 'ORGANIZADOR'];
 /** O campo aceita e-mail ou CPF: aplica a máscara de CPF apenas quando só há números. */
 const formatarLogin = (valor) => (valor.includes('@') || /[a-zA-Z]/.test(valor) ? valor : mascaraCpf(valor));
 
-/** Pede o link de redefinição de senha para o e-mail informado. */
+/**
+ * A recuperação de senha por e-mail ainda não está disponível: o botão só mostra este aviso.
+ * O backend já tem as rotas (/conta/recuperar-senha e /conta/redefinir-senha) para quando for ativada.
+ */
 function ModalEsqueciSenha({ perfil, onFechar }) {
-  const [email, setEmail] = useState('');
-  const [mensagem, setMensagem] = useState({ tipo: '', texto: '' });
-  const [enviando, setEnviando] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setEnviando(true);
-    try {
-      const { data } = await api.post('/conta/recuperar-senha', { email: email.trim(), perfil });
-      setMensagem({ tipo: 'sucesso', texto: data });
-    } catch (err) {
-      setMensagem({ tipo: 'erro', texto: mensagemDeErro(err, 'Não foi possível pedir a redefinição agora.') });
-    } finally {
-      setEnviando(false);
-    }
-  };
-
   return (
-    <Modal titulo="Esqueci minha senha" corTitulo={corDoPerfil(perfil)} onFechar={onFechar} bloqueado={enviando}>
-      <p style={{ color: '#a0aec0', fontSize: '0.84rem', lineHeight: '1.4', marginBottom: '14px' }}>
-        Informe o e-mail da sua conta de <strong>{perfil === 'ORGANIZADOR' ? 'Organizador' : 'Atleta'}</strong>.
-        Enviaremos um link para você criar uma nova senha.
-      </p>
-      <Alerta tipo={mensagem.tipo}>{mensagem.texto}</Alerta>
-      {mensagem.tipo !== 'sucesso' && (
-        <form onSubmit={handleSubmit}>
-          <label className="campo">
-            <span className="campo-rotulo">E-mail</span>
-            <input type="email" className="campo-entrada" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </label>
-          <div className="modal-acoes">
-            <button type="button" className="botao botao-secundario" onClick={onFechar}>Cancelar</button>
-            <button type="submit" className="botao botao-verde" disabled={enviando}>
-              {enviando ? 'Enviando...' : 'Enviar link'}
-            </button>
-          </div>
-        </form>
-      )}
-      {mensagem.tipo === 'sucesso' && (
-        <div className="modal-acoes">
-          <button type="button" className="botao botao-verde" onClick={onFechar}>Entendi</button>
-        </div>
-      )}
+    <Modal titulo="Esqueci minha senha" corTitulo={corDoPerfil(perfil)} onFechar={onFechar}>
+      <Alerta tipo="aviso">Funcionalidade ainda não implementada.</Alerta>
+      <div className="modal-acoes">
+        <button type="button" className="botao botao-verde" onClick={onFechar}>Entendi</button>
+      </div>
     </Modal>
   );
 }

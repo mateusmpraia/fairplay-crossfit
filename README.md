@@ -40,9 +40,11 @@ Ou use variáveis de ambiente:
 | `FAIRPLAY_ADMIN_USUARIO` / `FAIRPLAY_ADMIN_SENHA` | `master` / `master` | login do administrador (troque fora do ambiente de desenvolvimento) |
 | `FRONTEND_URL` | `http://localhost:5173` | usado no link do e-mail de recuperação de senha |
 
-**E-mail de recuperação de senha:** sem servidor SMTP configurado, o link é escrito no log do backend
-(procure por `redefinir-senha?token=`). Para enviar e-mails de verdade, descomente e preencha as linhas
-`spring.mail.*` em `backend/src/main/resources/application.properties`.
+**Recuperação de senha:** ainda desativada na interface — o botão "Esqueci minha senha" mostra o aviso
+"Funcionalidade ainda não implementada". O backend já tem as rotas (`/api/conta/recuperar-senha` e
+`/api/conta/redefinir-senha`); sem servidor SMTP, o link seria escrito no log. Para ativar no futuro, restaure o
+formulário em `frontend/src/pages/Login.jsx` e preencha as linhas `spring.mail.*` em
+`backend/src/main/resources/application.properties`.
 
 ### Frontend
 

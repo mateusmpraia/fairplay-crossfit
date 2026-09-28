@@ -130,11 +130,10 @@ export default () => executarTeste('resultados-e-conta', async (t) => {
   await t.clicar('Sair');
   await page.waitForFunction(() => location.pathname === '/login');
   await t.clicar('Esqueci minha senha');
-  await page.type('.modal input[type=email]', 'e2e.rita@t.com');
-  await t.clicar('Enviar link');
-  await t.esperarTexto('Se este e-mail estiver cadastrado');
+  await t.esperarTexto('Funcionalidade ainda não implementada.');
   await t.clicar('Entendi');
-  t.ok('Pedido de recuperação responde sem revelar se o e-mail existe');
+  await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 5000 });
+  t.ok('"Esqueci minha senha" mostra o aviso de funcionalidade ainda não implementada');
 
   await page.goto(`${BASE}/redefinir-senha?token=token-invalido`, { waitUntil: 'networkidle0' });
   const novas = await page.$$('input[type=password]');
