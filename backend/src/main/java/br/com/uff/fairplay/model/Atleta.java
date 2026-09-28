@@ -1,14 +1,27 @@
 package br.com.uff.fairplay.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.LocalDate;
 
+/**
+ * Usuário do sistema. O campo {@code perfil} diferencia ATLETA, ORGANIZADOR e HISTORICO
+ * (atleta criado automaticamente a partir do histórico importado). A mesma pessoa pode ter
+ * um cadastro por perfil, por isso as restrições de unicidade incluem o perfil.
+ */
 @Entity
 @Table(name = "atletas", uniqueConstraints = {
     @UniqueConstraint(name = "uk_cpf_perfil", columnNames = {"cpf", "perfil"}),
     @UniqueConstraint(name = "uk_email_perfil", columnNames = {"email", "perfil"}),
     @UniqueConstraint(name = "uk_celular_perfil", columnNames = {"celular", "perfil"})
 })
+@Getter
+@Setter
+@NoArgsConstructor
 public class Atleta {
 
     @Id
@@ -18,7 +31,7 @@ public class Atleta {
     @Column(nullable = false)
     private String nomeCompleto;
 
-    @Column(nullable = true, length = 14)
+    @Column(length = 14)
     private String cpf;
 
     @Column(nullable = false)
@@ -33,6 +46,8 @@ public class Atleta {
     @Column(nullable = false)
     private String email;
 
+    /** Hash BCrypt da senha. Nunca é enviado nas respostas da API. */
+    @JsonIgnore
     @Column(nullable = false)
     private String senha;
 
@@ -46,49 +61,5 @@ public class Atleta {
     private String nomeBox;
 
     @Column(nullable = false, length = 20)
-    private String perfil; // ATLETA ou ORGANIZADOR
-
-    @Transient
-    private Integer totalHistoricos = 0;
-
-    public Atleta() {}
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getNomeCompleto() { return nomeCompleto; }
-    public void setNomeCompleto(String nomeCompleto) { this.nomeCompleto = nomeCompleto; }
-
-    public String getCpf() { return cpf; }
-    public void setCpf(String cpf) { this.cpf = cpf; }
-
-    public LocalDate getDataNascimento() { return dataNascimento; }
-    public void setDataNascimento(LocalDate dataNascimento) { this.dataNascimento = dataNascimento; }
-
-    public String getGenero() { return genero; }
-    public void setGenero(String genero) { this.genero = genero; }
-
-    public String getCelular() { return celular; }
-    public void setCelular(String celular) { this.celular = celular; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getSenha() { return senha; }
-    public void setSenha(String senha) { this.senha = senha; }
-
-    public String getCidade() { return cidade; }
-    public void setCidade(String cidade) { this.cidade = cidade; }
-
-    public String getEstado() { return estado; }
-    public void setEstado(String estado) { this.estado = estado; }
-
-    public String getNomeBox() { return nomeBox; }
-    public void setNomeBox(String nomeBox) { this.nomeBox = nomeBox; }
-
-    public String getPerfil() { return perfil; }
-    public void setPerfil(String perfil) { this.perfil = perfil; }
-
-    public Integer getTotalHistoricos() { return totalHistoricos; }
-    public void setTotalHistoricos(Integer totalHistoricos) { this.totalHistoricos = totalHistoricos; }
+    private String perfil;
 }

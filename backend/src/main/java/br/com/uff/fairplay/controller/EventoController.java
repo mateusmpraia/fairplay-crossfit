@@ -1,6 +1,7 @@
 package br.com.uff.fairplay.controller;
 
 import br.com.uff.fairplay.dto.AtletaBuscaDTO;
+import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
@@ -8,102 +9,96 @@ import br.com.uff.fairplay.model.CategoriaEvento;
 import br.com.uff.fairplay.model.Evento;
 import br.com.uff.fairplay.model.InscricaoEvento;
 import br.com.uff.fairplay.repository.AtletaRepository;
-import br.com.uff.fairplay.repository.InscricaoEventoRepository;
+import br.com.uff.fairplay.security.UsuarioLogado;
 import br.com.uff.fairplay.service.EventoService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/** Gestão de eventos pelo organizador logado. Cada organizador só enxerga e altera os próprios eventos. */
 @RestController
 @RequestMapping("/api/eventos")
-@CrossOrigin(origins = {"http://localhost:5173", "http://127.0.0.1:5173"})
 public class EventoController {
 
     private final EventoService eventoService;
     private final AtletaRepository atletaRepository;
-    private final InscricaoEventoRepository inscricaoEventoRepository;
 
-    public EventoController(EventoService eventoService, 
-                            AtletaRepository atletaRepository,
-                            InscricaoEventoRepository inscricaoEventoRepository) {
+    public EventoController(EventoService eventoService, AtletaRepository atletaRepository) {
         this.eventoService = eventoService;
         this.atletaRepository = atletaRepository;
-        this.inscricaoEventoRepository = inscricaoEventoRepository;
+    }
+
+    // ---------------------------------------------------------------- Eventos
+
+    @GetMapping
+    public ResponseEntity<List<Evento>> listarMeusEventos(@AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.listarEventosDoOrganizador(organizador.id()));
     }
 
     @PostMapping
-    public ResponseEntity<Evento> criarEvento(@RequestBody CriarEventoDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.criarEvento(dto));
-    }
-
-    @GetMapping("/organizador/{organizadorId}")
-    public ResponseEntity<List<Evento>> listarPorOrganizador(@PathVariable Long organizadorId) {
-        return ResponseEntity.ok(eventoService.listarEventosPorOrganizador(organizadorId));
+    public ResponseEntity<Evento> criarEvento(@RequestBody CriarEventoDTO dto,
+                                              @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.criarEvento(dto, organizador.id()));
     }
 
     @DeleteMapping("/{id}")
-    @Transactional
-    public ResponseEntity<?> excluirEvento(@PathVariable Long id) {
-        eventoService.excluirEvento(id);
+    public ResponseEntity<String> excluirEvento(@PathVariable Long id,
+                                                @AuthenticationPrincipal UsuarioLogado organizador) {
+        eventoService.excluirEvento(id, organizador.id());
         return ResponseEntity.ok("Evento excluído com sucesso.");
     }
 
-    public record AtualizarRegrasDTO(boolean regraCampeaoSobe, boolean regraTresPodiosSobe, boolean regraTresParticipacoesSobe) {}
-
     @PutMapping("/{id}/regras")
-    @Transactional
-    public ResponseEntity<Evento> atualizarRegras(@PathVariable Long id, @RequestBody AtualizarRegrasDTO dto) {
-        Evento atualizado = eventoService.atualizarRegrasEReauditar(
-            id, 
-            dto.regraCampeaoSobe(), 
-            dto.regraTresPodiosSobe(), 
-            dto.regraTresParticipacoesSobe()
-        );
-        return ResponseEntity.ok(atualizado);
+    public ResponseEntity<Evento> atualizarRegras(@PathVariable Long id, @RequestBody AtualizarRegrasDTO dto,
+                                                  @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.atualizarRegrasEReauditar(id, dto, organizador.id()));
     }
 
+    // ---------------------------------------------------------------- Categorias
+
     @PostMapping("/{id}/categorias")
-    @Transactional
-    public ResponseEntity<CategoriaEvento> adicionarCategoria(@PathVariable Long id, @RequestBody CriarCategoriaDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.adicionarCategoria(id, dto));
+    public ResponseEntity<CategoriaEvento> adicionarCategoria(@PathVariable Long id, @RequestBody CriarCategoriaDTO dto,
+                                                              @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.adicionarCategoria(id, dto, organizador.id()));
     }
 
     @DeleteMapping("/categorias/{categoriaId}")
-    @Transactional
-    public ResponseEntity<?> excluirCategoria(@PathVariable Long categoriaId) {
-        eventoService.excluirCategoria(categoriaId);
+    public ResponseEntity<String> excluirCategoria(@PathVariable Long categoriaId,
+                                                   @AuthenticationPrincipal UsuarioLogado organizador) {
+        eventoService.excluirCategoria(categoriaId, organizador.id());
         return ResponseEntity.ok("Categoria excluída com sucesso.");
     }
 
+    // ---------------------------------------------------------------- Inscrições
+
     @PostMapping("/inscricoes")
-    public ResponseEntity<InscricaoEvento> inscreverAtleta(@RequestBody InscreverAtletaDTO dto) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.inscreverAtleta(dto));
+    public ResponseEntity<InscricaoEvento> inscreverAtleta(@RequestBody InscreverAtletaDTO dto,
+                                                           @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.inscreverAtleta(dto, organizador.id()));
     }
 
     @GetMapping("/categorias/{categoriaId}/inscricoes")
-    public ResponseEntity<List<InscricaoEvento>> listarInscricoesPorCategoria(@PathVariable Long categoriaId) {
-        return ResponseEntity.ok(inscricaoEventoRepository.findByCategoriaEventoId(categoriaId));
+    public ResponseEntity<List<InscricaoEvento>> listarInscricoesPorCategoria(@PathVariable Long categoriaId,
+                                                                              @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.listarInscricoes(categoriaId, organizador.id()));
     }
 
     @DeleteMapping("/inscricoes/{inscricaoId}")
-    @Transactional
-    public ResponseEntity<?> removerInscricao(@PathVariable Long inscricaoId) {
-        if (!inscricaoEventoRepository.existsById(inscricaoId)) {
-            return ResponseEntity.notFound().build();
-        }
-        inscricaoEventoRepository.deleteById(inscricaoId);
+    public ResponseEntity<String> removerInscricao(@PathVariable Long inscricaoId,
+                                                   @AuthenticationPrincipal UsuarioLogado organizador) {
+        eventoService.removerInscricao(inscricaoId, organizador.id());
         return ResponseEntity.ok("Atleta removido da categoria com sucesso.");
     }
 
-    // Busca atletas cadastrados por nome ou CPF (apenas uma declaração)
+    /** Busca atletas cadastrados e atletas do histórico ainda não cadastrados, por nome ou CPF. */
     @GetMapping("/atletas/buscar")
-    public ResponseEntity<List<AtletaBuscaDTO>> buscarAtletasParaInscricao(@RequestParam(value = "termo", required = false) String termo) {
-        String termoFormatado = (termo != null) ? termo.trim() : "";
-        String apenasDigitos = termoFormatado.replaceAll("\\D", "");
-        
-        return ResponseEntity.ok(atletaRepository.buscarPorNomeOuCpf(termoFormatado, apenasDigitos));
+    public ResponseEntity<List<AtletaBuscaDTO>> buscarAtletasParaInscricao(@RequestParam(required = false) String termo) {
+        String termoLimpo = termo != null ? termo.trim() : "";
+        // Termo só com números e pontuação de CPF: também compara com o CPF sem pontuação
+        String cpfDigitos = termoLimpo.matches("[\\d.\\-\\s]+") ? termoLimpo.replaceAll("\\D", "") : "";
+        return ResponseEntity.ok(atletaRepository.buscarPorNomeOuCpf(termoLimpo, cpfDigitos));
     }
 }

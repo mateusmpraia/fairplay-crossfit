@@ -9,7 +9,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/atletas/historico")
-@CrossOrigin(origins = {"http://localhost:5173", "http://127.0.0.1:5173"})
 public class HistoricoAtletaController {
 
     private final HistoricoAtletaRepository historicoAtletaRepository;
@@ -18,14 +17,12 @@ public class HistoricoAtletaController {
         this.historicoAtletaRepository = historicoAtletaRepository;
     }
 
+    /** Sugere perfis do histórico importado com nome parecido, para o atleta vincular no cadastro. */
     @GetMapping("/sugestoes")
-    public ResponseEntity<List<SugestaoAtletaDTO>> sugerirAtletas(@RequestParam(name = "nome") String nome) {
-        if (nome == null || nome.trim().length() < 3) {
+    public ResponseEntity<List<SugestaoAtletaDTO>> sugerirAtletas(@RequestParam String nome) {
+        if (nome.trim().length() < 3) {
             return ResponseEntity.ok(List.of());
         }
-
-        List<SugestaoAtletaDTO> sugestoes = historicoAtletaRepository.buscarSugestoesDesvinculadas(nome.trim());
-
-        return ResponseEntity.ok(sugestoes);
+        return ResponseEntity.ok(historicoAtletaRepository.buscarSugestoesPorNome(nome.trim()));
     }
 }

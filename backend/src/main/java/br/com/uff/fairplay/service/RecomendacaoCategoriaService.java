@@ -2,6 +2,7 @@ package br.com.uff.fairplay.service;
 
 import br.com.uff.fairplay.dto.DashboardAtletaDTO;
 import br.com.uff.fairplay.dto.ResultadoDTO;
+import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
 import br.com.uff.fairplay.model.Atleta;
 import br.com.uff.fairplay.model.CategoriaCompeticao;
 import br.com.uff.fairplay.model.HistoricoAtleta;
@@ -10,160 +11,131 @@ import br.com.uff.fairplay.repository.AtletaRepository;
 import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
 import br.com.uff.fairplay.repository.ResultadoCampeonatoRepository;
 import org.springframework.stereotype.Service;
-import java.util.*;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class RecomendacaoCategoriaService {
+
+    private static final String CATEGORIA_NAO_ESPECIFICADA = "Não especificada";
+
+    /** Ordem em que as categorias são avaliadas para promoção (da mais alta para a mais baixa). */
+    private static final CategoriaCompeticao[] HIERARQUIA_PROMOCAO = {
+            CategoriaCompeticao.RX,
+            CategoriaCompeticao.INTERMEDIARIO,
+            CategoriaCompeticao.SCALE,
+            CategoriaCompeticao.INICIANTE
+    };
 
     private final AtletaRepository atletaRepository;
     private final ResultadoCampeonatoRepository resultadoRepository;
     private final HistoricoAtletaRepository historicoAtletaRepository;
 
     public RecomendacaoCategoriaService(AtletaRepository atletaRepository,
-                                         ResultadoCampeonatoRepository resultadoRepository,
-                                         HistoricoAtletaRepository historicoAtletaRepository) {
+                                        ResultadoCampeonatoRepository resultadoRepository,
+                                        HistoricoAtletaRepository historicoAtletaRepository) {
         this.atletaRepository = atletaRepository;
         this.resultadoRepository = resultadoRepository;
         this.historicoAtletaRepository = historicoAtletaRepository;
     }
 
+    /** Monta o painel do atleta: histórico unificado, métricas e categoria recomendada. */
     public DashboardAtletaDTO obterDashboard(Long atletaId) {
         Atleta atleta = atletaRepository.findById(atletaId)
-                .orElseThrow(() -> new RuntimeException("Atleta não encontrado com ID: " + atletaId));
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Atleta não encontrado com ID: " + atletaId));
 
-        // 1. Busca os resultados cadastrados diretamente no sistema
         List<ResultadoCampeonato> resultadosManuais = resultadoRepository.findByAtletaIdOrderByDataCampeonatoDesc(atletaId);
-
-        // 2. Busca os resultados do histórico consolidado do CSV vinculado
         List<HistoricoAtleta> resultadosHistorico = historicoAtletaRepository.buscarHistoricoPorAtletaId(atletaId);
 
-        // 3. Monta a lista unificada para o frontend (ResultadoDTO)
-        List<ResultadoDTO> historicoDTO = new ArrayList<>();
+        // Lista exibida no painel (inclui registros sem categoria reconhecida)
+        List<ResultadoDTO> historico = new ArrayList<>();
+        // Registros usados no cálculo (apenas os com categoria e colocação válidas)
+        List<Participacao> participacoes = new ArrayList<>();
 
-        // Adiciona manuais
         for (ResultadoCampeonato r : resultadosManuais) {
-            historicoDTO.add(new ResultadoDTO(
+            historico.add(new ResultadoDTO(
                     r.getId(),
                     r.getNomeCampeonato(),
                     r.getDataCampeonato(),
-                    r.getCategoria() != null ? r.getCategoria().getDescricao() : "Não especificada",
+                    r.getCategoria() != null ? r.getCategoria().getDescricao() : CATEGORIA_NAO_ESPECIFICADA,
                     r.getColocacao()
             ));
+            if (r.getCategoria() != null && r.getColocacao() != null) {
+                participacoes.add(new Participacao(r.getCategoria(), r.getColocacao()));
+            }
         }
 
-        // Adiciona os históricos do CSV
         for (HistoricoAtleta h : resultadosHistorico) {
-            historicoDTO.add(new ResultadoDTO(
+            historico.add(new ResultadoDTO(
                     h.getId(),
                     h.getNomeCompeticao(),
-                    null, // Registros do histórico CSV não possuem data exata
-                    h.getCategoriaPadronizada() != null ? h.getCategoriaPadronizada() : "Não especificada",
+                    null, // o histórico importado não tem data
+                    h.getCategoriaPadronizada() != null ? h.getCategoriaPadronizada() : CATEGORIA_NAO_ESPECIFICADA,
                     h.getColocacao() != null ? h.getColocacao() : 0
             ));
-        }
-
-        // Cria registros simplificados para aplicar a regra de recomendação de categoria
-        List<RegistroCompeticaoUnificado> registrosParaCalculo = new ArrayList<>();
-        for (ResultadoCampeonato r : resultadosManuais) {
-            if (r.getCategoria() != null && r.getColocacao() != null) {
-                registrosParaCalculo.add(new RegistroCompeticaoUnificado(r.getCategoria(), r.getColocacao()));
-            }
-        }
-        for (HistoricoAtleta h : resultadosHistorico) {
-            CategoriaCompeticao cat = converterCategoria(h.getCategoriaPadronizada());
-            if (cat != null && h.getColocacao() != null) {
-                registrosParaCalculo.add(new RegistroCompeticaoUnificado(cat, h.getColocacao()));
+            CategoriaCompeticao categoria = CategoriaCompeticao.fromString(h.getCategoriaPadronizada());
+            if (categoria != null && h.getColocacao() != null) {
+                participacoes.add(new Participacao(categoria, h.getColocacao()));
             }
         }
 
-        int totalParticipacoes = historicoDTO.size();
-        int totalPodios = (int) registrosParaCalculo.stream()
-                .filter(r -> r.colocacao() > 0 && r.colocacao() <= 3)
+        int totalPodios = (int) participacoes.stream()
+                .filter(p -> p.colocacao() > 0 && p.colocacao() <= 3)
                 .count();
 
-        // 4. Cálculo da Recomendação de Categoria
-        String recomendada = "A Definir";
-        String motivo = "Atleta ainda não possui histórico de participações.";
-
-        if (!registrosParaCalculo.isEmpty()) {
-            RecomendacaoResult result = calcularRecomendacao(registrosParaCalculo);
-            recomendada = result.categoria();
-            motivo = result.motivo();
-        }
+        Recomendacao recomendacao = participacoes.isEmpty()
+                ? new Recomendacao("A Definir", "Atleta ainda não possui histórico de participações.")
+                : calcularRecomendacao(participacoes);
 
         return new DashboardAtletaDTO(
                 atleta.getId(),
                 atleta.getNomeCompleto(),
                 atleta.getNomeBox(),
                 atleta.getEstado(),
-                recomendada,
-                motivo,
-                totalParticipacoes,
+                recomendacao.categoria(),
+                recomendacao.motivo(),
+                historico.size(),
                 totalPodios,
-                historicoDTO
+                historico
         );
     }
 
-    private CategoriaCompeticao converterCategoria(String catTexto) {
-        if (catTexto == null) return null;
-        try {
-            return CategoriaCompeticao.fromString(catTexto);
-        } catch (Exception e) {
-            // Tenta conversões mais tolerantes caso a categoria seja um texto similar
-            String normalizado = catTexto.trim().toUpperCase();
-            if (normalizado.contains("RX")) return CategoriaCompeticao.RX;
-            if (normalizado.contains("INTERMEDI")) return CategoriaCompeticao.INTERMEDIARIO;
-            if (normalizado.contains("SCALE")) return CategoriaCompeticao.SCALE;
-            if (normalizado.contains("INIC")) return CategoriaCompeticao.INICIANTE;
-            return null;
-        }
-    }
-
-    private RecomendacaoResult calcularRecomendacao(List<RegistroCompeticaoUnificado> resultados) {
-        CategoriaCompeticao[] hierarquia = {
-                CategoriaCompeticao.RX,
-                CategoriaCompeticao.INTERMEDIARIO,
-                CategoriaCompeticao.SCALE,
-                CategoriaCompeticao.INICIANTE
-        };
-
-        // 1. Regra: Se foi campeão (1º lugar) em uma categoria, sobe para a próxima
-        for (CategoriaCompeticao cat : hierarquia) {
-            boolean foiCampeao = resultados.stream()
-                    .anyMatch(r -> r.categoria() == cat && r.colocacao() == 1);
-
+    /**
+     * Regras, em ordem: campeão numa categoria sobe para a próxima; 3 pódios na mesma categoria
+     * sobe para a próxima; caso contrário, mantém a categoria da participação mais recente.
+     */
+    private Recomendacao calcularRecomendacao(List<Participacao> participacoes) {
+        for (CategoriaCompeticao categoria : HIERARQUIA_PROMOCAO) {
+            boolean foiCampeao = participacoes.stream()
+                    .anyMatch(p -> p.categoria() == categoria && p.colocacao() == 1);
             if (foiCampeao) {
-                CategoriaCompeticao prox = cat.getProxima();
-                return new RecomendacaoResult(
-                        prox.getDescricao(),
-                        "Promovido automaticamente após ser Campeão na categoria " + cat.getDescricao() + "."
+                return new Recomendacao(
+                        categoria.getProxima().getDescricao(),
+                        "Promovido automaticamente após ser Campeão na categoria " + categoria.getDescricao() + "."
                 );
             }
         }
 
-        // 2. Regra: Se subiu 3 vezes no pódio (<= 3) na mesma categoria, sobe para a próxima
-        for (CategoriaCompeticao cat : hierarquia) {
-            long qtdPodios = resultados.stream()
-                    .filter(r -> r.categoria() == cat && r.colocacao() <= 3)
+        for (CategoriaCompeticao categoria : HIERARQUIA_PROMOCAO) {
+            long podios = participacoes.stream()
+                    .filter(p -> p.categoria() == categoria && p.colocacao() <= 3)
                     .count();
-
-            if (qtdPodios >= 3) {
-                CategoriaCompeticao prox = cat.getProxima();
-                return new RecomendacaoResult(
-                        prox.getDescricao(),
-                        "Promovido após conquistar " + qtdPodios + " pódios na categoria " + cat.getDescricao() + "."
+            if (podios >= 3) {
+                return new Recomendacao(
+                        categoria.getProxima().getDescricao(),
+                        "Promovido após conquistar " + podios + " pódios na categoria " + categoria.getDescricao() + "."
                 );
             }
         }
 
-        // Caso contrário, recomenda a primeira categoria encontrada
-        RegistroCompeticaoUnificado ultimo = resultados.get(0);
-        return new RecomendacaoResult(
-                ultimo.categoria().getDescricao(),
+        return new Recomendacao(
+                participacoes.get(0).categoria().getDescricao(),
                 "Baseado na participação recente sem critérios de promoção imediata atingidos."
         );
     }
 
-    private record RegistroCompeticaoUnificado(CategoriaCompeticao categoria, int colocacao) {}
-    private record RecomendacaoResult(String categoria, String motivo) {}
+    private record Participacao(CategoriaCompeticao categoria, int colocacao) {}
+
+    private record Recomendacao(String categoria, String motivo) {}
 }

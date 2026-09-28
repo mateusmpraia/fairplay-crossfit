@@ -1,6 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api, { encerrarSessao } from '../api';
+import { dataIsoParaMesAno } from '../utils/formatacao';
+import { estiloFeedback } from '../tema';
+
+/** Visual do selo de colocação para o pódio (1º, 2º e 3º lugares). */
+const PODIO = {
+  1: { texto: '🥇 1º Lugar (Campeão)', color: '#ffd700', backgroundColor: 'rgba(255, 215, 0, 0.12)', borderColor: '#ffd700' },
+  2: { texto: '🥈 2º Lugar (Vice)', color: '#e2e8f0', backgroundColor: 'rgba(226, 232, 240, 0.12)', borderColor: '#cbd5e0' },
+  3: { texto: '🥉 3º Lugar', color: '#cd7f32', backgroundColor: 'rgba(205, 127, 50, 0.12)', borderColor: '#cd7f32' },
+};
+
+function SeloColocacao({ colocacao }) {
+  const podio = PODIO[colocacao];
+  if (!podio) {
+    return <span style={styles.rankBadge}>{colocacao}º Lugar</span>;
+  }
+  const { texto, ...cores } = podio;
+  return <span style={{ ...styles.podioBadge, ...cores }}>{texto}</span>;
+}
 
 export default function DashboardAtleta() {
   const navigate = useNavigate();
@@ -9,32 +27,27 @@ export default function DashboardAtleta() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
-  // Estados do Modal de Edição de Perfil
+  // Modal de edição de perfil
   const [modalEditarAberto, setModalEditarAberto] = useState(false);
   const [editNome, setEditNome] = useState('');
   const [editBox, setEditBox] = useState('');
   const [salvandoPerfil, setSalvandoPerfil] = useState(false);
   const [feedbackPerfil, setFeedbackPerfil] = useState({ tipo: '', texto: '' });
 
-  // ID do atleta logado (obtido do localStorage ou padrão 1 para testes)
-  const atletaId = localStorage.getItem('atletaId') || 1;
+  // ID do atleta logado (a rota só abre com login de atleta)
+  const atletaId = localStorage.getItem('atletaId');
 
   useEffect(() => {
-    carregarDados();
-  }, []);
+    api.get(`/atletas/${atletaId}/dashboard`)
+      .then(({ data }) => setDashboardData(data))
+      .catch(() => setErro('Não foi possível carregar os dados do atleta.'))
+      .finally(() => setCarregando(false));
+  }, [atletaId]);
 
-  const carregarDados = async () => {
-    try {
-      setCarregando(true);
-      const response = await axios.get(`http://localhost:8080/api/atletas/${atletaId}/dashboard`);
-      setDashboardData(response.data);
-      setEditNome(response.data.nomeCompleto || '');
-      setEditBox(response.data.nomeBox || '');
-    } catch (err) {
-      setErro('Não foi possível carregar os dados do atleta.');
-    } finally {
-      setCarregando(false);
-    }
+  const abrirModalEditar = () => {
+    setEditNome(dashboardData.nomeCompleto);
+    setEditBox(dashboardData.nomeBox);
+    setModalEditarAberto(true);
   };
 
   const handleSalvarPerfil = async (e) => {
@@ -43,25 +56,20 @@ export default function DashboardAtleta() {
     setFeedbackPerfil({ tipo: '', texto: '' });
 
     try {
-      const resp = await axios.put(`http://localhost:8080/api/atletas/${atletaId}/perfil`, {
+      const { data } = await api.put(`/atletas/${atletaId}/perfil`, {
         nomeCompleto: editNome,
         nomeBox: editBox
       });
 
-      // Atualiza os dados na tela e no localStorage
-      setDashboardData(prev => ({
-        ...prev,
-        nomeCompleto: resp.data.nomeCompleto,
-        nomeBox: resp.data.nomeBox
-      }));
-      localStorage.setItem('usuarioNome', resp.data.nomeCompleto);
+      setDashboardData((prev) => ({ ...prev, nomeCompleto: data.nomeCompleto, nomeBox: data.nomeBox }));
+      localStorage.setItem('usuarioNome', data.nomeCompleto);
 
       setFeedbackPerfil({ tipo: 'sucesso', texto: 'Dados atualizados com sucesso!' });
       setTimeout(() => {
         setModalEditarAberto(false);
         setFeedbackPerfil({ tipo: '', texto: '' });
       }, 900);
-    } catch (err) {
+    } catch {
       setFeedbackPerfil({ tipo: 'erro', texto: 'Erro ao atualizar os dados do perfil.' });
     } finally {
       setSalvandoPerfil(false);
@@ -69,28 +77,8 @@ export default function DashboardAtleta() {
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    encerrarSessao();
     navigate('/login');
-  };
-
-  const formatarData = (dataIso) => {
-    if (!dataIso) return 'Histórico Consolidado';
-    const [ano, mes] = dataIso.split('-');
-    const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    return `${meses[parseInt(mes, 10) - 1]}/${ano}`;
-  };
-
-  const renderColocacaoBadge = (colocacao) => {
-    if (colocacao === 1) {
-      return <span style={{ ...styles.podioBadge, color: '#ffd700', backgroundColor: 'rgba(255, 215, 0, 0.12)', borderColor: '#ffd700' }}>🥇 1º Lugar (Campeão)</span>;
-    }
-    if (colocacao === 2) {
-      return <span style={{ ...styles.podioBadge, color: '#e2e8f0', backgroundColor: 'rgba(226, 232, 240, 0.12)', borderColor: '#cbd5e0' }}>🥈 2º Lugar (Vice)</span>;
-    }
-    if (colocacao === 3) {
-      return <span style={{ ...styles.podioBadge, color: '#cd7f32', backgroundColor: 'rgba(205, 127, 50, 0.12)', borderColor: '#cd7f32' }}>🥉 3º Lugar</span>;
-    }
-    return <span style={styles.rankBadge}>{colocacao}º Lugar</span>;
   };
 
   if (carregando) {
@@ -120,14 +108,7 @@ export default function DashboardAtleta() {
         </div>
 
         <div style={styles.navRight}>
-          <button 
-            onClick={() => {
-              setEditNome(dashboardData.nomeCompleto);
-              setEditBox(dashboardData.nomeBox);
-              setModalEditarAberto(true);
-            }} 
-            style={styles.btnEditarPerfil}
-          >
+          <button onClick={abrirModalEditar} style={styles.btnEditarPerfil}>
             ✏️ Editar Perfil
           </button>
           <button onClick={handleLogout} style={styles.logoutButton}>
@@ -202,13 +183,13 @@ export default function DashboardAtleta() {
                           {item.nomeCampeonato}
                         </td>
                         <td style={{ ...styles.td, color: '#a0aec0' }}>
-                          📅 {formatarData(item.dataCampeonato)}
+                          📅 {item.dataCampeonato ? dataIsoParaMesAno(item.dataCampeonato) : 'Histórico Consolidado'}
                         </td>
                         <td style={styles.td}>
                           <span style={styles.categoryBadge}>{item.categoria}</span>
                         </td>
                         <td style={styles.td}>
-                          {renderColocacaoBadge(item.colocacao)}
+                          <SeloColocacao colocacao={item.colocacao} />
                         </td>
                       </tr>
                     ))}
@@ -241,12 +222,7 @@ export default function DashboardAtleta() {
             </p>
 
             {feedbackPerfil.texto && (
-              <div style={{
-                ...styles.modalAlert,
-                backgroundColor: feedbackPerfil.tipo === 'sucesso' ? 'rgba(0, 255, 136, 0.12)' : 'rgba(255, 68, 68, 0.12)',
-                borderColor: feedbackPerfil.tipo === 'sucesso' ? '#00ff88' : '#ff4444',
-                color: feedbackPerfil.tipo === 'sucesso' ? '#00ff88' : '#ff4444',
-              }}>
+              <div style={{ ...styles.modalAlert, ...estiloFeedback(feedbackPerfil.tipo) }}>
                 {feedbackPerfil.texto}
               </div>
             )}

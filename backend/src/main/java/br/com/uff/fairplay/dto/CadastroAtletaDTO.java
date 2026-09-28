@@ -13,7 +13,6 @@ public record CadastroAtletaDTO(
     String cidade,
     String estado,
     String nomeBox,
-    String perfil,
-    String historicoNomeAtleta, // Opcional: preenchido quando o atleta seleciona o perfil histórico
-    String historicoBoxOrigem   // Opcional: preenchido quando o atleta seleciona o perfil histórico
+    String perfil,              // "ATLETA" (padrão) ou "ORGANIZADOR"
+    String historicoNomeAtleta  // opcional: nome do perfil do histórico que o atleta escolheu vincular
 ) {}

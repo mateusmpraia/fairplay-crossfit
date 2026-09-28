@@ -1,15 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import { useState, useEffect } from 'react';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import api, { mensagemDeErro } from '../api';
+import { mascaraCpf, mascaraCelular, mascaraData, dataBrParaIso } from '../utils/formatacao';
+import { corDoPerfil, imagemDoPerfil, estiloFeedback } from '../tema';
+
+const PERFIS = ['ATLETA', 'ORGANIZADOR'];
+
+const MASCARAS = {
+  cpf: mascaraCpf,
+  celular: mascaraCelular,
+  dataNascimento: mascaraData,
+};
 
 export default function CadastroAtleta() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const tipoParam = searchParams.get('tipo');
-  const tipoInicial = tipoParam && tipoParam.toUpperCase() === 'ORGANIZADOR' ? 'ORGANIZADOR' : 'ATLETA';
-
-  const [tipoUsuario, setTipoUsuario] = useState(tipoInicial);
+  const [tipoUsuario, setTipoUsuario] = useState(
+    searchParams.get('tipo')?.toUpperCase() === 'ORGANIZADOR' ? 'ORGANIZADOR' : 'ATLETA'
+  );
 
   const [formData, setFormData] = useState({
     nomeCompleto: '',
@@ -25,172 +34,104 @@ export default function CadastroAtleta() {
     nomeBox: ''
   });
 
+  // Perfis do histórico importado com nome parecido, que o atleta pode vincular à conta
   const [sugestoesHistorico, setSugestoesHistorico] = useState([]);
   const [perfilVinculado, setPerfilVinculado] = useState(null);
 
-  const [mensagem, setMensagem] = useState({ tipo: '', texto: '' });
+  const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
 
-  useEffect(() => {
-    if (tipoParam && (tipoParam.toUpperCase() === 'ATLETA' || tipoParam.toUpperCase() === 'ORGANIZADOR')) {
-      setTipoUsuario(tipoParam.toUpperCase());
-    }
-  }, [tipoParam]);
+  const isAtleta = tipoUsuario === 'ATLETA';
+  const accentColor = corDoPerfil(tipoUsuario);
 
+  const nomeParaBusca = formData.nomeCompleto.trim();
+  const buscarHistorico = isAtleta && !perfilVinculado && nomeParaBusca.length >= 3;
+  const mostrarSugestoes = buscarHistorico && sugestoesHistorico.length > 0;
+
+  // Busca sugestões do histórico enquanto o atleta digita o nome (com atraso de 400 ms)
   useEffect(() => {
-    if (tipoUsuario !== 'ATLETA' || perfilVinculado || formData.nomeCompleto.trim().length < 3) {
-      setSugestoesHistorico([]);
-      return;
-    }
+    if (!buscarHistorico) return;
 
     const timer = setTimeout(async () => {
       try {
-        const response = await axios.get(
-          `http://localhost:8080/api/atletas/historico/sugestoes?nome=${encodeURIComponent(formData.nomeCompleto.trim())}`
-        );
-        setSugestoesHistorico(response.data || []);
+        const { data } = await api.get('/atletas/historico/sugestoes', { params: { nome: nomeParaBusca } });
+        setSugestoesHistorico(data || []);
       } catch (err) {
-        console.error("Erro ao buscar histórico:", err);
+        console.error('Erro ao buscar histórico:', err);
       }
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [formData.nomeCompleto, tipoUsuario, perfilVinculado]);
+  }, [buscarHistorico, nomeParaBusca]);
+
+  const trocarPerfil = (perfil) => {
+    setTipoUsuario(perfil);
+    setErro('');
+    setPerfilVinculado(null);
+  };
 
   const handleSelecionarHistorico = (item) => {
     setPerfilVinculado(item);
     setSugestoesHistorico([]);
-    
-    let boxPrincipal = item.boxOrigem || '';
-    if (boxPrincipal.includes(' / ')) {
-      boxPrincipal = boxPrincipal.split(' / ')[0].trim();
+
+    // O histórico pode ter vários boxes ("Box A / Box B"): usa o primeiro para preencher o campo
+    const boxPrincipal = (item.boxOrigem || '').split(' / ')[0].trim();
+    if (boxPrincipal && boxPrincipal !== 'N/D') {
+      setFormData((prev) => ({ ...prev, nomeBox: boxPrincipal }));
     }
-
-    setFormData((prev) => ({
-      ...prev,
-      nomeBox: boxPrincipal && boxPrincipal !== 'N/D' ? boxPrincipal : prev.nomeBox
-    }));
-  };
-
-  const handleRemoverVinculo = () => {
-    setPerfilVinculado(null);
-  };
-
-  const maskCPF = (value) => {
-    return value
-      .replace(/\D/g, '')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})/, '$1-$2')       .replace(/(-\d{2})\d+?$/, '$1');
-  };
-
-  const maskPhone = (value) => {
-    return value
-      .replace(/\D/g, '')
-      .replace(/(\d{2})(\d)/, '($1) $2')
-      .replace(/(\d{5})(\d)/, '$1-$2')       .replace(/(-\d{4})\d+?$/, '$1');
-  };
-
-  const maskDate = (value) => {
-    return value
-      .replace(/\D/g, '')
-      .replace(/(\d{2})(\d)/, '$1/$2')
-      .replace(/(\d{2})(\d)/, '$1/$2')       .replace(/(\d{4})\d+?$/, '$1');
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    let formattedValue = value;
-
-    if (name === 'cpf') formattedValue = maskCPF(value);
-    if (name === 'celular') formattedValue = maskPhone(value);
-    if (name === 'dataNascimento') formattedValue = maskDate(value);
-
-    setFormData({ ...formData, [name]: formattedValue });
-  };
-
-  const formatarDataParaIso = (dataBr) => {
-    if (!dataBr || dataBr.length !== 10) return null;
-    const partes = dataBr.split('/');
-    if (partes.length !== 3) return null;
-
-    const dia = parseInt(partes[0], 10);
-    const mes = parseInt(partes[1], 10);
-    const ano = parseInt(partes[2], 10);
-
-    if (isNaN(dia) || isNaN(mes) || isNaN(ano)) return null;
-    if (mes < 1 || mes > 12 || dia < 1 || dia > 31 || ano < 1900 || ano > 2100) return null;
-
-    const diaStr = String(dia).padStart(2, '0');
-    const mesStr = String(mes).padStart(2, '0');
-
-    return `${ano}-${mesStr}-${diaStr}`;
+    const mascara = MASCARAS[name];
+    setFormData({ ...formData, [name]: mascara ? mascara(value) : value });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setMensagem({ tipo: '', texto: '' });
+    setErro('');
 
     if (formData.senha !== formData.confirmarSenha) {
-      setMensagem({ tipo: 'erro', texto: 'A confirmação de senha não confere.' });
+      setErro('A confirmação de senha não confere.');
       return;
     }
 
-    const dataIso = formatarDataParaIso(formData.dataNascimento);
+    const dataIso = dataBrParaIso(formData.dataNascimento);
     if (!dataIso) {
-      setMensagem({ tipo: 'erro', texto: 'Informe uma data de nascimento válida no formato DD/MM/AAAA.' });
+      setErro('Informe uma data de nascimento válida no formato DD/MM/AAAA.');
       return;
     }
 
     setCarregando(true);
 
     try {
-      const payload = {
+      await api.post('/atletas/cadastro', {
         ...formData,
         dataNascimento: dataIso,
         perfil: tipoUsuario,
-        historicoNomeAtleta: perfilVinculado ? perfilVinculado.nomeAtleta : null,
-        historicoBoxOrigem: perfilVinculado ? perfilVinculado.boxOrigem : null
-      };
+        historicoNomeAtleta: perfilVinculado?.nomeAtleta ?? null,
+      });
 
-      const response = await axios.post('http://localhost:8080/api/atletas/cadastro', payload);
-
-      if (response.status === 201) {
-        const perfilDescricao = tipoUsuario === 'ORGANIZADOR' ? 'Organizador' : 'Atleta';
-        navigate('/login', {
-          state: {
-            cadastroSucesso: true,
-            tipoCadastrado: tipoUsuario,
-            mensagem: `Cadastro de ${perfilDescricao} realizado com sucesso! Faça login para continuar.`
-          }
-        });
-      }
+      const perfilDescricao = isAtleta ? 'Atleta' : 'Organizador';
+      navigate('/login', {
+        state: {
+          cadastroSucesso: true,
+          tipoCadastrado: tipoUsuario,
+          mensagem: `Cadastro de ${perfilDescricao} realizado com sucesso! Faça login para continuar.`
+        }
+      });
     } catch (err) {
-      const errorMsg = typeof err.response?.data === 'string'
-        ? err.response.data
-        : 'Erro ao conectar com o servidor.';
-      setMensagem({ tipo: 'erro', texto: errorMsg });
+      setErro(mensagemDeErro(err, 'Erro ao conectar com o servidor.'));
     } finally {
       setCarregando(false);
     }
   };
 
-  const isAtleta = tipoUsuario === 'ATLETA';
-  const accentColor = isAtleta ? '#00ff88' : '#00bfff';
-
-  const atletaImg = 'https://images.pexels.com/photos/1552242/pexels-photo-1552242.jpeg?auto=compress&cs=tinysrgb&w=1000';
-  const organizadorImg = 'https://images.pexels.com/photos/618612/pexels-photo-618612.jpeg?v=2&auto=compress&cs=tinysrgb&w=1000';
-
   return (
     <div style={styles.pageWrapper}>
       <div style={styles.cardContainer}>
-        {/* Banner Lateral */}
-        <div
-          style={{
-            ...styles.imageBanner,
-            backgroundImage: `url("${isAtleta ? atletaImg : organizadorImg}")`
-          }}
-        >
+        {/* Banner lateral */}
+        <div style={{ ...styles.imageBanner, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
           <div style={styles.overlay}>
             <h2 style={{ ...styles.bannerTitle, color: accentColor }}>FAIRPLAY</h2>
             <p style={styles.bannerText}>
@@ -204,39 +145,25 @@ export default function CadastroAtleta() {
         {/* Formulário */}
         <div style={styles.formSection}>
           <div style={styles.tabContainer}>
-            <button
-              type="button"
-              onClick={() => {
-                setTipoUsuario('ATLETA');
-                setMensagem({ tipo: '', texto: '' });
-                setPerfilVinculado(null);
-              }}
-              style={{
-                ...styles.tabButton,
-                backgroundColor: isAtleta ? '#00ff88' : 'transparent',
-                color: isAtleta ? '#000000' : '#a0aec0',
-                borderColor: isAtleta ? '#00ff88' : '#2d3748',
-              }}
-            >
-              ATLETA
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTipoUsuario('ORGANIZADOR');
-                setMensagem({ tipo: '', texto: '' });
-                setPerfilVinculado(null);
-                setSugestoesHistorico([]);
-              }}
-              style={{
-                ...styles.tabButton,
-                backgroundColor: !isAtleta ? '#00bfff' : 'transparent',
-                color: !isAtleta ? '#000000' : '#a0aec0',
-                borderColor: !isAtleta ? '#00bfff' : '#2d3748',
-              }}
-            >
-              ORGANIZADOR
-            </button>
+            {PERFIS.map((perfil) => {
+              const ativo = tipoUsuario === perfil;
+              const cor = corDoPerfil(perfil);
+              return (
+                <button
+                  key={perfil}
+                  type="button"
+                  onClick={() => trocarPerfil(perfil)}
+                  style={{
+                    ...styles.tabButton,
+                    backgroundColor: ativo ? cor : 'transparent',
+                    color: ativo ? '#000000' : '#a0aec0',
+                    borderColor: ativo ? cor : '#2d3748',
+                  }}
+                >
+                  {perfil}
+                </button>
+              );
+            })}
           </div>
 
           <div style={styles.header}>
@@ -250,21 +177,7 @@ export default function CadastroAtleta() {
             </p>
           </div>
 
-          {mensagem.texto && (
-            <div
-              style={{
-                ...styles.alert,
-                backgroundColor:
-                  mensagem.tipo === 'sucesso'
-                    ? 'rgba(0, 255, 136, 0.1)'
-                    : 'rgba(255, 68, 68, 0.1)',
-                borderColor: mensagem.tipo === 'sucesso' ? accentColor : '#ff4444',
-                color: mensagem.tipo === 'sucesso' ? accentColor : '#ff4444',
-              }}
-            >
-              {mensagem.texto}
-            </div>
-          )}
+          {erro && <div style={{ ...styles.alert, ...estiloFeedback('erro') }}>{erro}</div>}
 
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.inputGroup}>
@@ -280,13 +193,13 @@ export default function CadastroAtleta() {
               />
             </div>
 
-            {isAtleta && sugestoesHistorico.length > 0 && !perfilVinculado && (
+            {mostrarSugestoes && (
               <div style={styles.sugestoesCard}>
                 <div style={styles.sugestoesHeader}>
                   <span>🔍 Encontramos competições anteriores no seu nome:</span>
                 </div>
-                {sugestoesHistorico.map((item, idx) => (
-                  <div key={idx} style={styles.sugestaoItem}>
+                {sugestoesHistorico.map((item) => (
+                  <div key={item.nomeAtleta} style={styles.sugestaoItem}>
                     <div>
                       <div style={styles.sugestaoNome}>{item.nomeAtleta}</div>
                       <div style={styles.sugestaoDetalhe}>
@@ -315,7 +228,7 @@ export default function CadastroAtleta() {
                 </div>
                 <button
                   type="button"
-                  onClick={handleRemoverVinculo}
+                  onClick={() => setPerfilVinculado(null)}
                   style={styles.btnDesfazer}
                 >
                   Desfazer
@@ -483,9 +396,9 @@ export default function CadastroAtleta() {
 
             <p style={styles.loginPrompt}>
               Já tem uma conta?{' '}
-              <a href="/login" style={{ ...styles.loginLink, color: accentColor }}>
+              <Link to="/login" style={{ ...styles.loginLink, color: accentColor }}>
                 Faça login aqui
-              </a>
+              </Link>
             </p>
           </form>
         </div>

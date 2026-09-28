@@ -1,65 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import api, { mensagemDeErro, iniciarSessao } from '../api';
+import { mascaraCpf } from '../utils/formatacao';
+import { corDoPerfil, imagemDoPerfil } from '../tema';
+
+const PERFIS = ['ATLETA', 'ORGANIZADOR'];
+
+/** O campo aceita e-mail ou CPF: aplica a máscara de CPF apenas quando só há números. */
+const formatarLogin = (valor) => (valor.includes('@') || /[a-zA-Z]/.test(valor) ? valor : mascaraCpf(valor));
 
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [tipoUsuario, setTipoUsuario] = useState('ATLETA'); // ATLETA | ORGANIZADOR
-  const [formData, setFormData] = useState({
-    login: '',
-    senha: ''
-  });
+  // Quando chega aqui vindo de um cadastro concluído, mostra a mensagem e já seleciona o perfil cadastrado
+  const vindoDoCadastro = location.state?.cadastroSucesso ? location.state : null;
 
+  const [tipoUsuario, setTipoUsuario] = useState(vindoDoCadastro?.tipoCadastrado || 'ATLETA');
+  const [formData, setFormData] = useState({ login: '', senha: '' });
   const [mensagemErro, setMensagemErro] = useState('');
-  const [mensagemSucesso, setMensagemSucesso] = useState('');
+  const [mensagemSucesso, setMensagemSucesso] = useState(
+    vindoDoCadastro ? vindoDoCadastro.mensagem || 'Cadastro realizado com sucesso! Faça login para continuar.' : ''
+  );
   const [carregando, setCarregando] = useState(false);
 
-  // Estados do Modal Administrativo Master
+  // Modal de acesso do administrador master
   const [modalAdminAberto, setModalAdminAberto] = useState(false);
   const [adminUser, setAdminUser] = useState('');
   const [adminPass, setAdminPass] = useState('');
   const [adminErro, setAdminErro] = useState('');
   const [carregandoAdmin, setCarregandoAdmin] = useState(false);
 
-  // Verifica se veio de um cadastro recém-concluído
+  // Limpa o state da navegação para a mensagem de cadastro não reaparecer ao recarregar a página
   useEffect(() => {
     if (location.state?.cadastroSucesso) {
-      setMensagemSucesso(location.state.mensagem || 'Cadastro realizado com sucesso! Faça login para continuar.');
-      if (location.state.tipoCadastrado) {
-        setTipoUsuario(location.state.tipoCadastrado);
-      }
-      // Limpa o state para não reaparecer no refresh
       window.history.replaceState({}, document.title);
     }
   }, [location]);
 
   const isAtleta = tipoUsuario === 'ATLETA';
-  const accentColor = isAtleta ? '#00ff88' : '#00bfff';
+  const accentColor = corDoPerfil(tipoUsuario);
 
-  const atletaImg = 'https://images.pexels.com/photos/1552242/pexels-photo-1552242.jpeg?auto=compress&cs=tinysrgb&w=1000';
-  const organizadorImg = 'https://images.pexels.com/photos/618612/pexels-photo-618612.jpeg?v=2&auto=compress&cs=tinysrgb&w=1000';
-
-  const formatLoginInput = (value) => {
-    if (value.includes('@') || /[a-zA-Z]/.test(value)) {
-      return value;
-    }
-
-    const onlyDigits = value.replace(/\D/g, '').slice(0, 11);
-    return onlyDigits
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})/, '$1-$2');
+  const trocarPerfil = (perfil) => {
+    setTipoUsuario(perfil);
+    setMensagemErro('');
+    setMensagemSucesso('');
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'login') {
-      setFormData({ ...formData, login: formatLoginInput(value) });
-    } else {
-      setFormData({ ...formData, [name]: value });
-    }
+    setFormData({ ...formData, [name]: name === 'login' ? formatarLogin(value) : value });
   };
 
   const handleSubmit = async (e) => {
@@ -69,33 +59,28 @@ export default function Login() {
     setCarregando(true);
 
     try {
-      const payload = {
+      const { data } = await api.post('/atletas/login', {
         login: formData.login.trim(),
         senha: formData.senha,
-        perfil: tipoUsuario
-      };
+        perfil: tipoUsuario,
+      });
 
-      const response = await axios.post('http://localhost:8080/api/atletas/login', payload);
+      localStorage.clear();
+      iniciarSessao(data);
 
-      if (response.status === 200) {
-        localStorage.setItem('atletaId', response.data.id);
-        localStorage.setItem('usuarioNome', response.data.nome);
-        localStorage.setItem('usuarioPerfil', response.data.perfil);
-
-        if (response.data.perfil === 'ORGANIZADOR') {
-          navigate('/organizador/eventos');
-        } else {
-          navigate('/atleta/home');
-        }
-      }
+      navigate(data.perfil === 'ORGANIZADOR' ? '/organizador/eventos' : '/atleta/home');
     } catch (err) {
-      const erroTexto = typeof err.response?.data === 'string' 
-        ? err.response.data 
-        : 'Credenciais inválidas ou erro no servidor.';
-      setMensagemErro(erroTexto);
+      setMensagemErro(mensagemDeErro(err, 'Credenciais inválidas ou erro no servidor.'));
     } finally {
       setCarregando(false);
     }
+  };
+
+  const abrirModalAdmin = () => {
+    setAdminErro('');
+    setAdminUser('');
+    setAdminPass('');
+    setModalAdminAberto(true);
   };
 
   const handleLoginMaster = async (e) => {
@@ -104,18 +89,12 @@ export default function Login() {
     setCarregandoAdmin(true);
 
     try {
-      const resp = await axios.post('http://localhost:8080/api/admin/usuarios/login', {
-        usuario: adminUser,
-        senha: adminPass
-      });
-
-      if (resp.status === 200) {
-        localStorage.setItem('usuarioPerfil', 'MASTER_ADMIN');
-        localStorage.setItem('tokenMaster', resp.data.token);
-        setModalAdminAberto(false);
-        navigate('/admin/usuarios');
-      }
-    } catch (err) {
+      const { data } = await api.post('/admin/usuarios/login', { usuario: adminUser, senha: adminPass });
+      localStorage.clear();
+      iniciarSessao(data);
+      setModalAdminAberto(false);
+      navigate('/admin/usuarios');
+    } catch {
       setAdminErro('Usuário ou senha de administrador incorretos.');
     } finally {
       setCarregandoAdmin(false);
@@ -125,12 +104,9 @@ export default function Login() {
   return (
     <div style={styles.pageWrapper}>
       <div style={styles.cardContainer}>
-        
-        {/* Banner Lateral */}
-        <div style={{
-          ...styles.imageBanner,
-          backgroundImage: `url("${isAtleta ? atletaImg : organizadorImg}")`
-        }}>
+
+        {/* Banner lateral */}
+        <div style={{ ...styles.imageBanner, backgroundImage: `url("${imagemDoPerfil(tipoUsuario)}")` }}>
           <div style={styles.overlay}>
             <h2 style={{ ...styles.bannerTitle, color: accentColor }}>FAIRPLAY</h2>
             <p style={styles.bannerText}>
@@ -141,35 +117,28 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Formulário de Login */}
+        {/* Formulário de login */}
         <div style={styles.formSection}>
-          
-          {/* Seletor de Perfil */}
           <div style={styles.tabContainer}>
-            <button
-              type="button"
-              onClick={() => { setTipoUsuario('ATLETA'); setMensagemErro(''); setMensagemSucesso(''); }}
-              style={{
-                ...styles.tabButton,
-                backgroundColor: isAtleta ? '#00ff88' : 'transparent',
-                color: isAtleta ? '#000000' : '#a0aec0',
-                borderColor: isAtleta ? '#00ff88' : '#2d3748',
-              }}
-            >
-              ATLETA
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTipoUsuario('ORGANIZADOR'); setMensagemErro(''); setMensagemSucesso(''); }}
-              style={{
-                ...styles.tabButton,
-                backgroundColor: !isAtleta ? '#00bfff' : 'transparent',
-                color: !isAtleta ? '#000000' : '#a0aec0',
-                borderColor: !isAtleta ? '#00bfff' : '#2d3748',
-              }}
-            >
-              ORGANIZADOR
-            </button>
+            {PERFIS.map((perfil) => {
+              const ativo = tipoUsuario === perfil;
+              const cor = corDoPerfil(perfil);
+              return (
+                <button
+                  key={perfil}
+                  type="button"
+                  onClick={() => trocarPerfil(perfil)}
+                  style={{
+                    ...styles.tabButton,
+                    backgroundColor: ativo ? cor : 'transparent',
+                    color: ativo ? '#000000' : '#a0aec0',
+                    borderColor: ativo ? cor : '#2d3748',
+                  }}
+                >
+                  {perfil}
+                </button>
+              );
+            })}
           </div>
 
           <div style={styles.header}>
@@ -179,18 +148,13 @@ export default function Login() {
             </p>
           </div>
 
-          {/* Mensagem de sucesso ao retornar de um cadastro */}
           {mensagemSucesso && (
             <div style={{ ...styles.alertSucesso, borderColor: accentColor, color: accentColor }}>
               ✓ {mensagemSucesso}
             </div>
           )}
 
-          {mensagemErro && (
-            <div style={styles.alertErro}>
-              {mensagemErro}
-            </div>
-          )}
+          {mensagemErro && <div style={styles.alertErro}>{mensagemErro}</div>}
 
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.inputGroup}>
@@ -232,50 +196,31 @@ export default function Login() {
               {carregando ? 'ENTRANDO...' : `ENTRAR COMO ${tipoUsuario}`}
             </button>
 
-            {/* Link dinâmico que envia o perfil atual selecionado */}
             <p style={styles.registerPrompt}>
               Ainda não tem conta?{' '}
-              <Link 
-                to={`/cadastro?tipo=${tipoUsuario}`} 
-                style={{ ...styles.registerLink, color: accentColor }}
-              >
+              <Link to={`/cadastro?tipo=${tipoUsuario}`} style={{ ...styles.registerLink, color: accentColor }}>
                 Cadastre-se aqui
               </Link>
             </p>
 
-            {/* Botão de Acesso Master */}
-            <button
-              type="button"
-              onClick={() => {
-                setAdminErro('');
-                setAdminUser('');
-                setAdminPass('');
-                setModalAdminAberto(true);
-              }}
-              style={styles.btnAcessoMaster}
-            >
+            <button type="button" onClick={abrirModalAdmin} style={styles.btnAcessoMaster}>
               🛡️ Gerenciador de Cadastros (Admin)
             </button>
           </form>
         </div>
-
       </div>
 
-      {/* Modal de Autenticação Master */}
+      {/* Modal de autenticação master */}
       {modalAdminAberto && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
             <div style={styles.modalHeader}>
               <h3 style={{ color: '#00ff88', margin: 0, fontSize: '1.2rem' }}>Acesso Master</h3>
-              <button 
-                type="button" 
-                onClick={() => setModalAdminAberto(false)}
-                style={styles.btnFecharModal}
-              >
+              <button type="button" onClick={() => setModalAdminAberto(false)} style={styles.btnFecharModal}>
                 ✕
               </button>
             </div>
-            
+
             <p style={{ color: '#a0aec0', fontSize: '0.84rem', margin: '8px 0 16px 0', lineHeight: '1.4' }}>
               Informe suas credenciais de administrador para acessar a gestão de cadastros.
             </p>
@@ -308,15 +253,11 @@ export default function Login() {
               </div>
 
               <div style={styles.modalActions}>
-                <button
-                  type="button"
-                  onClick={() => setModalAdminAberto(false)}
-                  style={styles.btnModalCancelar}
-                >
+                <button type="button" onClick={() => setModalAdminAberto(false)} style={styles.btnModalCancelar}>
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={carregandoAdmin}
                   style={{
                     ...styles.btnModalConfirmar,

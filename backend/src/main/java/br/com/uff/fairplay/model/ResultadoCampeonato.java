@@ -2,10 +2,18 @@ package br.com.uff.fairplay.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.LocalDate;
 
+/** Resultado de campeonato lançado manualmente no sistema para um atleta. */
 @Entity
 @Table(name = "resultados_campeonato")
+@Getter
+@Setter
+@NoArgsConstructor
 public class ResultadoCampeonato {
 
     @Id
@@ -29,24 +37,4 @@ public class ResultadoCampeonato {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "atleta_id", nullable = false)
     private Atleta atleta;
-
-    public ResultadoCampeonato() {}
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getNomeCampeonato() { return nomeCampeonato; }
-    public void setNomeCampeonato(String nomeCampeonato) { this.nomeCampeonato = nomeCampeonato; }
-
-    public LocalDate getDataCampeonato() { return dataCampeonato; }
-    public void setDataCampeonato(LocalDate dataCampeonato) { this.dataCampeonato = dataCampeonato; }
-
-    public CategoriaCompeticao getCategoria() { return categoria; }
-    public void setCategoria(CategoriaCompeticao categoria) { this.categoria = categoria; }
-
-    public Integer getColocacao() { return colocacao; }
-    public void setColocacao(Integer colocacao) { this.colocacao = colocacao; }
-
-    public Atleta getAtleta() { return atleta; }
-    public void setAtleta(Atleta atleta) { this.atleta = atleta; }
 }

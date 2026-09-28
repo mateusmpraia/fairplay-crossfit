@@ -1,10 +1,79 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api, { mensagemDeErro, encerrarSessao } from '../api';
+import { mascaraData, dataBrParaIso, dataIsoParaBr, formatarCpf } from '../utils/formatacao';
+import { estiloFeedback } from '../tema';
+
+const FORMATOS = ['Individual', 'Dupla', 'Trio', 'Time'];
+const GENEROS = ['Masculino', 'Feminino', 'Misto'];
+const NIVEIS = ['Iniciante', 'Scale', 'Intermediário', 'RX', 'Elite', 'Master'];
+
+const CATEGORIA_PADRAO = { formato: 'Individual', genero: 'Masculino', nivel: 'Scale' };
+
+const EVENTO_VAZIO = {
+  nome: '',
+  dataInicio: '',
+  dataFim: '',
+  localizacao: '',
+  regraCampeaoSobe: true,
+  regraTresPodiosSobe: true,
+  regraTresParticipacoesSobe: false,
+  categorias: []
+};
+
+/** Critérios de promoção obrigatória: rótulo curto (painel do evento) e longo (criação do evento). */
+const REGRAS = [
+  { campo: 'regraCampeaoSobe', rotuloCurto: 'Já foi campeão', rotuloLongo: 'Já foi campeão na categoria anterior' },
+  { campo: 'regraTresPodiosSobe', rotuloCurto: '3 pódios na categoria', rotuloLongo: 'Já conquistou 3 pódios na categoria anterior' },
+  { campo: 'regraTresParticipacoesSobe', rotuloCurto: '3 participações', rotuloLongo: 'Já participou 3x da mesma categoria' },
+];
+
+const SEM_FEEDBACK = { tipo: '', texto: '' };
+
+const descreverCategoria = (categoria) => `${categoria.formato} • ${categoria.genero} • ${categoria.nivel}`;
+
+/** Se o termo for um CPF completo, prefere o atleta com esse CPF; senão, o primeiro da lista. */
+function escolherAtleta(lista, termo) {
+  const cpfDigitado = termo.replace(/\D/g, '');
+  if (cpfDigitado.length === 11) {
+    const exato = lista.find((a) => (a.cpf || '').replace(/\D/g, '') === cpfDigitado);
+    if (exato) return exato;
+  }
+  return lista[0];
+}
+
+function Opcoes({ valores }) {
+  return valores.map((valor) => <option key={valor} value={valor}>{valor}</option>);
+}
+
+function ModalConfirmacao({ titulo, children, textoConfirmar, textoProcessando, processando, onConfirmar, onCancelar }) {
+  return (
+    <div style={styles.modalOverlay}>
+      <div style={styles.modalContentSmall}>
+        <div style={styles.modalHeader}>
+          <h3 style={{ color: '#ff4444', margin: 0, fontSize: '1.15rem' }}>{titulo}</h3>
+          <button type="button" onClick={onCancelar} style={styles.btnFecharModal}>✕</button>
+        </div>
+
+        <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5', margin: '14px 0 20px 0' }}>
+          {children}
+        </p>
+
+        <div style={styles.modalActions}>
+          <button type="button" onClick={onCancelar} style={styles.btnCancelar}>
+            Cancelar
+          </button>
+          <button type="button" disabled={processando} onClick={onConfirmar} style={styles.btnConfirmarExclusao}>
+            {processando ? textoProcessando : textoConfirmar}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardOrganizador() {
   const navigate = useNavigate();
-  const organizadorId = localStorage.getItem('atletaId');
   const organizadorNome = localStorage.getItem('usuarioNome') || 'Organizador';
 
   const [eventos, setEventos] = useState([]);
@@ -13,319 +82,221 @@ export default function DashboardOrganizador() {
   const [inscritos, setInscritos] = useState([]);
   const [carregando, setCarregando] = useState(true);
 
-  // Estados de Criação de Evento
+  // Criação de evento
   const [modalCriarAberto, setModalCriarAberto] = useState(false);
   const [erroModalEvento, setErroModalEvento] = useState('');
   const [salvando, setSalvando] = useState(false);
-  const [novoEvento, setNovoEvento] = useState({
-    nome: '',
-    dataInicio: '',
-    dataFim: '',
-    localizacao: '',
-    regraCampeaoSobe: true,
-    regraTresPodiosSobe: true,
-    regraTresParticipacoesSobe: false,
-    categorias: []
-  });
-  const [novaCatCriacao, setNovaCatCriacao] = useState({ formato: 'Individual', genero: 'Masculino', nivel: 'Scale' });
+  const [novoEvento, setNovoEvento] = useState(EVENTO_VAZIO);
+  const [novaCatCriacao, setNovaCatCriacao] = useState(CATEGORIA_PADRAO);
 
-  // Estados para Adicionar Categoria no Evento já Existente
+  // Nova categoria em evento existente
   const [modalAddCatAberto, setModalAddCatAberto] = useState(false);
-  const [novaCatExistente, setNovaCatExistente] = useState({ formato: 'Individual', genero: 'Masculino', nivel: 'Scale' });
+  const [novaCatExistente, setNovaCatExistente] = useState(CATEGORIA_PADRAO);
 
-  // Estados de Busca de Atleta
+  // Busca e inscrição de atletas
   const [termoBuscaAtleta, setTermoBuscaAtleta] = useState('');
   const [sugestoesAtletas, setSugestoesAtletas] = useState([]);
-  const [feedbackInscricao, setFeedbackInscricao] = useState({ tipo: '', texto: '' });
+  const [feedbackInscricao, setFeedbackInscricao] = useState(SEM_FEEDBACK);
   const [inscrevendo, setInscrevendo] = useState(false);
 
-  // Modais de Exclusão
-  const [modalExcluirInscricaoAberto, setModalExcluirInscricaoAberto] = useState(false);
-  const [inscricaoParaExcluir, setInscricaoParaExcluir] = useState(null);
-
-  const [modalExcluirEventoAberto, setModalExcluirEventoAberto] = useState(false);
+  // Confirmações de exclusão: o modal fica aberto enquanto o item estiver definido
   const [eventoParaExcluir, setEventoParaExcluir] = useState(null);
-
-  const [modalExcluirCatAberto, setModalExcluirCatAberto] = useState(false);
   const [categoriaParaExcluir, setCategoriaParaExcluir] = useState(null);
-
+  const [inscricaoParaExcluir, setInscricaoParaExcluir] = useState(null);
   const [processandoAcao, setProcessandoAcao] = useState(false);
 
-  useEffect(() => {
-    carregarEventos();
-  }, [organizadorId]);
+  const termoBusca = termoBuscaAtleta.trim();
+  const buscaAtiva = termoBusca.length >= 3;
+  const sugestoesVisiveis = buscaAtiva ? sugestoesAtletas : [];
 
-  const carregarEventos = async () => {
-    try {
-      setCarregando(true);
-      const res = await axios.get(`http://localhost:8080/api/eventos/organizador/${organizadorId}`);
-      setEventos(res.data || []);
-      if (res.data && res.data.length > 0) {
-        selecionarEvento(res.data[0]);
-      } else {
-        setEventoSelecionado(null);
-        setCategoriaSelecionada(null);
-        setInscritos([]);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar eventos:', err);
-    } finally {
-      setCarregando(false);
-    }
+  const limparBusca = () => {
+    setTermoBuscaAtleta('');
+    setSugestoesAtletas([]);
   };
 
-  const selecionarEvento = (ev) => {
-    setEventoSelecionado(ev);
-    if (ev.categorias && ev.categorias.length > 0) {
-      selecionarCategoria(ev.categorias[0]);
+  const selecionarCategoria = useCallback(async (categoria) => {
+    setCategoriaSelecionada(categoria);
+    setTermoBuscaAtleta('');
+    setSugestoesAtletas([]);
+    try {
+      const { data } = await api.get(`/eventos/categorias/${categoria.id}/inscricoes`);
+      setInscritos(data || []);
+    } catch (err) {
+      console.error('Erro ao carregar inscritos:', err);
+    }
+  }, []);
+
+  const selecionarEvento = useCallback((evento) => {
+    setEventoSelecionado(evento);
+    if (evento.categorias?.length > 0) {
+      selecionarCategoria(evento.categorias[0]);
     } else {
       setCategoriaSelecionada(null);
       setInscritos([]);
     }
+  }, [selecionarCategoria]);
+
+  const limparSelecao = () => {
+    setEventoSelecionado(null);
+    setCategoriaSelecionada(null);
+    setInscritos([]);
   };
 
-  const selecionarCategoria = async (cat) => {
-    setCategoriaSelecionada(cat);
-    setTermoBuscaAtleta('');
-    setSugestoesAtletas([]);
-    try {
-      const res = await axios.get(`http://localhost:8080/api/eventos/categorias/${cat.id}/inscricoes`);
-      setInscritos(res.data || []);
-    } catch (err) {
-      console.error('Erro ao carregar inscritos:', err);
-    }
+  /** Substitui o evento alterado tanto na seleção atual quanto na lista lateral. */
+  const atualizarEvento = (eventoAtualizado) => {
+    setEventoSelecionado(eventoAtualizado);
+    setEventos((prev) => prev.map((ev) => (ev.id === eventoAtualizado.id ? eventoAtualizado : ev)));
   };
 
-  const formatarCpfParaExibicao = (cpf) => {
-    if (!cpf) return '';
-    const limpo = cpf.replace(/\D/g, '');
-    if (limpo.length !== 11) return cpf;
-    return limpo.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-  };
-
-  // Busca de atletas otimizada com debounce
   useEffect(() => {
-    const termoLimpo = termoBuscaAtleta.trim();
+    api.get('/eventos')
+      .then(({ data }) => {
+        const lista = data || [];
+        setEventos(lista);
+        if (lista.length > 0) selecionarEvento(lista[0]);
+      })
+      .catch((err) => console.error('Erro ao carregar eventos:', err))
+      .finally(() => setCarregando(false));
+  }, [selecionarEvento]);
 
-    if (termoLimpo.length < 3) {
-      setSugestoesAtletas([]);
-      return;
-    }
+  // Busca de atletas enquanto o organizador digita (com atraso de 300 ms)
+  useEffect(() => {
+    if (!buscaAtiva) return;
 
     const timer = setTimeout(async () => {
       try {
-        const res = await axios.get(`http://localhost:8080/api/eventos/atletas/buscar?termo=${encodeURIComponent(termoLimpo)}`);
-        setSugestoesAtletas(res.data || []);
+        const { data } = await api.get('/eventos/atletas/buscar', { params: { termo: termoBusca } });
+        setSugestoesAtletas(data || []);
       } catch (err) {
         console.error('Erro na busca de atletas:', err);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [termoBuscaAtleta, categoriaSelecionada]);
+  }, [buscaAtiva, termoBusca]);
 
-  const handleInscreverAtletaDireto = async (atleta) => {
-    if (!atleta || !categoriaSelecionada || inscrevendo) return;
+  // ---------------------------------------------------------------- Inscrições
 
-    // Validação de Compatibilidade de Gênero
-    const generoCat = (categoriaSelecionada.genero || '').toUpperCase();
-    const sexoAtleta = (atleta.genero || atleta.sexo || '').toUpperCase();
+  /** Motivo pelo qual o atleta não pode ser inscrito na categoria selecionada, ou null se puder. */
+  const verificarImpedimento = (atleta) => {
+    const generoCategoria = (categoriaSelecionada.genero || '').toUpperCase();
+    const generoAtleta = (atleta.genero || '').toUpperCase();
 
-    const isMisto = generoCat.includes('MIST');
-    const isCatMasc = generoCat.includes('MASC');
-    const isCatFem = generoCat.includes('FEM');
-
-    const isAtletaMasc = sexoAtleta.startsWith('M');
-    const isAtletaFem = sexoAtleta.startsWith('F');
-
-    if (!isMisto) {
-      if (isCatMasc && !isAtletaMasc) {
-        setFeedbackInscricao({
-          tipo: 'erro',
-          texto: `O atleta ${atleta.nomeCompleto} (Feminino) não pode ser inscrito em uma categoria masculina.`
-        });
-        setTermoBuscaAtleta('');
-        setSugestoesAtletas([]);
-        return;
+    if (!generoCategoria.includes('MIST')) {
+      if (generoCategoria.includes('MASC') && !generoAtleta.startsWith('M')) {
+        return { tipo: 'erro', texto: `O atleta ${atleta.nomeCompleto} (Feminino) não pode ser inscrito em uma categoria masculina.` };
       }
-
-      if (isCatFem && !isAtletaFem) {
-        setFeedbackInscricao({
-          tipo: 'erro',
-          texto: `O atleta ${atleta.nomeCompleto} (Masculino) não pode ser inscrito em uma categoria feminina.`
-        });
-        setTermoBuscaAtleta('');
-        setSugestoesAtletas([]);
-        return;
+      if (generoCategoria.includes('FEM') && !generoAtleta.startsWith('F')) {
+        return { tipo: 'erro', texto: `O atleta ${atleta.nomeCompleto} (Masculino) não pode ser inscrito em uma categoria feminina.` };
       }
     }
 
-    // Validação se já está inscrito localmente
-    const jaInscrito = inscritos.some(ins => ins.atleta?.id === atleta.id);
-    if (jaInscrito) {
-      setFeedbackInscricao({
-        tipo: 'aviso',
-        texto: `O atleta ${atleta.nomeCompleto} já está cadastrado nesta categoria.`
-      });
-      setTermoBuscaAtleta('');
-      setSugestoesAtletas([]);
+    if (inscritos.some((ins) => ins.atleta?.id === atleta.id)) {
+      return { tipo: 'aviso', texto: `O atleta ${atleta.nomeCompleto} já está cadastrado nesta categoria.` };
+    }
+
+    return null;
+  };
+
+  const handleInscreverAtleta = async (atleta) => {
+    if (!atleta || !categoriaSelecionada || inscrevendo) return;
+
+    limparBusca();
+
+    const impedimento = verificarImpedimento(atleta);
+    if (impedimento) {
+      setFeedbackInscricao(impedimento);
       return;
     }
 
-    setFeedbackInscricao({ tipo: '', texto: '' });
+    setFeedbackInscricao(SEM_FEEDBACK);
     setInscrevendo(true);
-    setTermoBuscaAtleta('');
-    setSugestoesAtletas([]);
 
     try {
-      const res = await axios.post('http://localhost:8080/api/eventos/inscricoes', {
+      const { data } = await api.post('/eventos/inscricoes', {
         categoriaEventoId: categoriaSelecionada.id,
         atletaId: atleta.id
       });
 
-      setInscritos((prev) => [res.data, ...prev]);
+      setInscritos((prev) => [data, ...prev]);
       setFeedbackInscricao({
-        tipo: res.data.statusElegibilidade === 'REGULAR' ? 'sucesso' : 'aviso',
-        texto: `Atleta ${atleta.nomeCompleto} inscrito com status: ${res.data.statusElegibilidade}`
+        tipo: data.statusElegibilidade === 'REGULAR' ? 'sucesso' : 'aviso',
+        texto: `Atleta ${atleta.nomeCompleto} inscrito com status: ${data.statusElegibilidade}`
       });
     } catch (err) {
-      setFeedbackInscricao({
-        tipo: 'erro',
-        texto: typeof err.response?.data === 'string' ? err.response.data : (err.response?.data?.message || 'Erro ao inscrever atleta.')
-      });
+      setFeedbackInscricao({ tipo: 'erro', texto: mensagemDeErro(err, 'Erro ao inscrever atleta.') });
     } finally {
       setInscrevendo(false);
     }
   };
 
-  // Inscrição via Enter
+  // Enter no campo de busca inscreve o melhor resultado (buscando na hora se ainda não houver sugestões)
   const handleKeyDownBusca = async (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
 
-    if (!categoriaSelecionada || inscrevendo) return;
+    if (!categoriaSelecionada || inscrevendo || !buscaAtiva) return;
 
-    const termoLimpo = termoBuscaAtleta.trim();
-    if (termoLimpo.length < 3) return;
-
-    const apenasDigitos = termoLimpo.replace(/\D/g, '');
-
-    if (sugestoesAtletas.length > 0) {
-      if (apenasDigitos.length === 11) {
-        const atletaExato = sugestoesAtletas.find(a => (a.cpf || '').replace(/\D/g, '') === apenasDigitos);
-        if (atletaExato) {
-          handleInscreverAtletaDireto(atletaExato);
-          return;
-        }
-      }
-      handleInscreverAtletaDireto(sugestoesAtletas[0]);
+    if (sugestoesVisiveis.length > 0) {
+      handleInscreverAtleta(escolherAtleta(sugestoesVisiveis, termoBusca));
       return;
     }
 
     try {
       setInscrevendo(true);
-      const res = await axios.get(`http://localhost:8080/api/eventos/atletas/buscar?termo=${encodeURIComponent(termoLimpo)}`);
-      const lista = res.data || [];
+      const { data } = await api.get('/eventos/atletas/buscar', { params: { termo: termoBusca } });
+      const lista = data || [];
       if (lista.length > 0) {
-        if (apenasDigitos.length === 11) {
-          const exato = lista.find(a => (a.cpf || '').replace(/\D/g, '') === apenasDigitos);
-          handleInscreverAtletaDireto(exato || lista[0]);
-        } else {
-          handleInscreverAtletaDireto(lista[0]);
-        }
+        handleInscreverAtleta(escolherAtleta(lista, termoBusca));
       } else {
-        setFeedbackInscricao({
-          tipo: 'erro',
-          texto: 'Nenhum atleta encontrado com este nome ou CPF.'
-        });
+        setFeedbackInscricao({ tipo: 'erro', texto: 'Nenhum atleta encontrado com este nome ou CPF.' });
       }
-    } catch (err) {
-      setFeedbackInscricao({
-        tipo: 'erro',
-        texto: 'Erro ao buscar atleta para inscrição.'
-      });
+    } catch {
+      setFeedbackInscricao({ tipo: 'erro', texto: 'Erro ao buscar atleta para inscrição.' });
     } finally {
       setInscrevendo(false);
     }
   };
 
-  const handleToggleRegra = async (campoRegra) => {
+  const confirmarExclusaoInscricao = async () => {
+    setProcessandoAcao(true);
+    try {
+      await api.delete(`/eventos/inscricoes/${inscricaoParaExcluir.id}`);
+      setInscritos((prev) => prev.filter((ins) => ins.id !== inscricaoParaExcluir.id));
+      setInscricaoParaExcluir(null);
+      setFeedbackInscricao({ tipo: 'sucesso', texto: 'Atleta removido da categoria com sucesso.' });
+    } catch (err) {
+      alert(mensagemDeErro(err, 'Não foi possível remover o atleta.'));
+    } finally {
+      setProcessandoAcao(false);
+    }
+  };
+
+  // ---------------------------------------------------------------- Regras e categorias do evento
+
+  /** Liga/desliga um critério de promoção; o backend refaz a auditoria de todos os inscritos. */
+  const handleToggleRegra = async (campo) => {
     if (!eventoSelecionado) return;
 
-    const regrasAtualizadas = {
-      regraCampeaoSobe: campoRegra === 'regraCampeaoSobe' ? !eventoSelecionado.regraCampeaoSobe : eventoSelecionado.regraCampeaoSobe,
-      regraTresPodiosSobe: campoRegra === 'regraTresPodiosSobe' ? !eventoSelecionado.regraTresPodiosSobe : eventoSelecionado.regraTresPodiosSobe,
-      regraTresParticipacoesSobe: campoRegra === 'regraTresParticipacoesSobe' ? !eventoSelecionado.regraTresParticipacoesSobe : eventoSelecionado.regraTresParticipacoesSobe
+    const regras = {
+      regraCampeaoSobe: eventoSelecionado.regraCampeaoSobe,
+      regraTresPodiosSobe: eventoSelecionado.regraTresPodiosSobe,
+      regraTresParticipacoesSobe: eventoSelecionado.regraTresParticipacoesSobe,
+      [campo]: !eventoSelecionado[campo],
     };
 
     try {
-      const res = await axios.put(`http://localhost:8080/api/eventos/${eventoSelecionado.id}/regras`, regrasAtualizadas);
-      
-      const eventoAtualizado = {
-        ...eventoSelecionado,
-        ...res.data,
-        categorias: eventoSelecionado.categorias
-      };
-
-      setEventoSelecionado(eventoAtualizado);
-      setEventos(prev => prev.map(ev => ev.id === eventoAtualizado.id ? eventoAtualizado : ev));
+      const { data } = await api.put(`/eventos/${eventoSelecionado.id}/regras`, regras);
+      atualizarEvento({ ...eventoSelecionado, ...data, categorias: eventoSelecionado.categorias });
 
       if (categoriaSelecionada) {
-        const resInscritos = await axios.get(`http://localhost:8080/api/eventos/categorias/${categoriaSelecionada.id}/inscricoes`);
+        const resInscritos = await api.get(`/eventos/categorias/${categoriaSelecionada.id}/inscricoes`);
         setInscritos(resInscritos.data || []);
       }
 
-      setFeedbackInscricao({
-        tipo: 'sucesso',
-        texto: 'Critérios atualizados e auditoria recalculada para todos os atletas.'
-      });
+      setFeedbackInscricao({ tipo: 'sucesso', texto: 'Critérios atualizados e auditoria recalculada para todos os atletas.' });
     } catch (err) {
-      alert('Erro ao atualizar regras do torneio.');
-    }
-  };
-
-  const confirmarExclusaoEvento = async () => {
-    if (!eventoParaExcluir) return;
-    setProcessandoAcao(true);
-
-    try {
-      await axios.delete(`http://localhost:8080/api/eventos/${eventoParaExcluir.id}`);
-      const novaLista = eventos.filter(ev => ev.id !== eventoParaExcluir.id);
-      setEventos(novaLista);
-      setModalExcluirEventoAberto(false);
-      setEventoParaExcluir(null);
-
-      if (novaLista.length > 0) {
-        selecionarEvento(novaLista[0]);
-      } else {
-        setEventoSelecionado(null);
-        setCategoriaSelecionada(null);
-        setInscritos([]);
-      }
-    } catch (err) {
-      alert('Erro ao excluir evento.');
-    } finally {
-      setProcessandoAcao(false);
-    }
-  };
-
-  const confirmarExclusaoAtleta = async () => {
-    if (!inscricaoParaExcluir) return;
-    setProcessandoAcao(true);
-
-    try {
-      await axios.delete(`http://localhost:8080/api/eventos/inscricoes/${inscricaoParaExcluir.id}`);
-      setInscritos((prev) => prev.filter((ins) => ins.id !== inscricaoParaExcluir.id));
-      setModalExcluirInscricaoAberto(false);
-      setInscricaoParaExcluir(null);
-      setFeedbackInscricao({
-        tipo: 'sucesso',
-        texto: 'Atleta removido da categoria com sucesso.'
-      });
-    } catch (err) {
-      alert('Não foi possível remover o atleta.');
-    } finally {
-      setProcessandoAcao(false);
+      alert(mensagemDeErro(err, 'Erro ao atualizar regras do torneio.'));
     }
   };
 
@@ -334,82 +305,90 @@ export default function DashboardOrganizador() {
     if (!eventoSelecionado) return;
 
     try {
-      const res = await axios.post(`http://localhost:8080/api/eventos/${eventoSelecionado.id}/categorias`, novaCatExistente);
-      const novaCatCriada = res.data;
-
-      const categoriasAtualizadas = [...(eventoSelecionado.categorias || []), novaCatCriada];
-      const eventoAtualizado = { ...eventoSelecionado, categorias: categoriasAtualizadas };
-
-      setEventoSelecionado(eventoAtualizado);
-      setEventos(prev => prev.map(ev => ev.id === eventoAtualizado.id ? eventoAtualizado : ev));
+      const { data: categoriaCriada } = await api.post(`/eventos/${eventoSelecionado.id}/categorias`, novaCatExistente);
+      atualizarEvento({
+        ...eventoSelecionado,
+        categorias: [...(eventoSelecionado.categorias || []), categoriaCriada]
+      });
       setModalAddCatAberto(false);
-      selecionarCategoria(novaCatCriada);
+      selecionarCategoria(categoriaCriada);
     } catch (err) {
-      alert('Erro ao incluir nova categoria no torneio.');
+      alert(mensagemDeErro(err, 'Erro ao incluir nova categoria no torneio.'));
     }
   };
 
   const confirmarExclusaoCategoria = async () => {
-    if (!categoriaParaExcluir) return;
     setProcessandoAcao(true);
-
     try {
-      await axios.delete(`http://localhost:8080/api/eventos/categorias/${categoriaParaExcluir.id}`);
-      const catsRestantes = eventoSelecionado.categorias.filter(c => c.id !== categoriaParaExcluir.id);
-      const eventoAtualizado = { ...eventoSelecionado, categorias: catsRestantes };
-
-      setEventoSelecionado(eventoAtualizado);
-      setEventos(prev => prev.map(ev => ev.id === eventoAtualizado.id ? eventoAtualizado : ev));
-      setModalExcluirCatAberto(false);
+      await api.delete(`/eventos/categorias/${categoriaParaExcluir.id}`);
+      const categoriasRestantes = eventoSelecionado.categorias.filter((c) => c.id !== categoriaParaExcluir.id);
+      atualizarEvento({ ...eventoSelecionado, categorias: categoriasRestantes });
       setCategoriaParaExcluir(null);
 
-      if (catsRestantes.length > 0) {
-        selecionarCategoria(catsRestantes[0]);
+      if (categoriasRestantes.length > 0) {
+        selecionarCategoria(categoriasRestantes[0]);
       } else {
         setCategoriaSelecionada(null);
         setInscritos([]);
       }
     } catch (err) {
-      alert('Erro ao excluir categoria.');
+      alert(mensagemDeErro(err, 'Erro ao excluir categoria.'));
     } finally {
       setProcessandoAcao(false);
     }
   };
 
-  const maskDate = (value) => {
-    const digits = value.replace(/\D/g, '').slice(0, 8);
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  // ---------------------------------------------------------------- Eventos
+
+  const confirmarExclusaoEvento = async () => {
+    setProcessandoAcao(true);
+    try {
+      await api.delete(`/eventos/${eventoParaExcluir.id}`);
+      const eventosRestantes = eventos.filter((ev) => ev.id !== eventoParaExcluir.id);
+      setEventos(eventosRestantes);
+      setEventoParaExcluir(null);
+
+      if (eventosRestantes.length > 0) {
+        selecionarEvento(eventosRestantes[0]);
+      } else {
+        limparSelecao();
+      }
+    } catch (err) {
+      alert(mensagemDeErro(err, 'Erro ao excluir evento.'));
+    } finally {
+      setProcessandoAcao(false);
+    }
   };
 
-  const formatarParaIso = (dataPtBr) => {
-    if (!dataPtBr || dataPtBr.length !== 10) return null;
-    const [dia, mes, ano] = dataPtBr.split('/');
-    return `${ano}-${mes}-${dia}`;
+  const abrirModalCriar = () => {
+    setErroModalEvento('');
+    setModalCriarAberto(true);
   };
 
-  const formatarParaExibicao = (dataIso) => {
-    if (!dataIso) return '';
-    const partes = dataIso.split('-');
-    if (partes.length !== 3) return dataIso;
-    return `${partes[2]}/${partes[1]}/${partes[0]}`;
+  const fecharModalCriar = () => {
+    setModalCriarAberto(false);
+    setErroModalEvento('');
+  };
+
+  const alterarNovoEvento = (campo, valor) => {
+    setNovoEvento((prev) => ({ ...prev, [campo]: valor }));
+    setErroModalEvento('');
   };
 
   const handleSalvarNovoEvento = async (e) => {
     e.preventDefault();
     setErroModalEvento('');
 
-    if (!novoEvento.nome || novoEvento.nome.trim().length < 3) {
+    const dataInicio = dataBrParaIso(novoEvento.dataInicio);
+
+    if (novoEvento.nome.trim().length < 3) {
       setErroModalEvento('Informe um nome com pelo menos 3 letras para o evento.');
       return;
     }
-
-    if (!novoEvento.dataInicio || novoEvento.dataInicio.length !== 10) {
+    if (!dataInicio) {
       setErroModalEvento('Informe a data de início no formato DD/MM/AAAA.');
       return;
     }
-
     if (novoEvento.categorias.length === 0) {
       setErroModalEvento('Adicione pelo menos uma categoria ao evento.');
       return;
@@ -418,29 +397,16 @@ export default function DashboardOrganizador() {
     setSalvando(true);
 
     try {
-      const payload = {
+      const { data } = await api.post('/eventos', {
         ...novoEvento,
-        dataInicio: formatarParaIso(novoEvento.dataInicio),
-        dataFim: novoEvento.dataFim ? formatarParaIso(novoEvento.dataFim) : null,
-        organizadorId: Number(organizadorId)
-      };
-
-      const res = await axios.post('http://localhost:8080/api/eventos', payload);
-      setEventos([res.data, ...eventos]);
-      selecionarEvento(res.data);
-      setModalCriarAberto(false);
-      setErroModalEvento('');
-      setNovoEvento({
-        nome: '',
-        dataInicio: '',
-        dataFim: '',
-        localizacao: '',
-        regraCampeaoSobe: true,
-        regraTresPodiosSobe: true,
-        regraTresParticipacoesSobe: false,
-        categorias: []
+        dataInicio,
+        dataFim: novoEvento.dataFim ? dataBrParaIso(novoEvento.dataFim) : null
       });
-    } catch (err) {
+      setEventos((prev) => [data, ...prev]);
+      selecionarEvento(data);
+      fecharModalCriar();
+      setNovoEvento(EVENTO_VAZIO);
+    } catch {
       setErroModalEvento('Erro ao criar torneio no servidor.');
     } finally {
       setSalvando(false);
@@ -448,13 +414,13 @@ export default function DashboardOrganizador() {
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    encerrarSessao();
     navigate('/login');
   };
 
   return (
     <div style={styles.container}>
-      {/* Barra de Navegação Superior */}
+      {/* Barra superior */}
       <header style={styles.navbar}>
         <div style={styles.navLeft}>
           <span style={styles.brand}>FairPlay</span>
@@ -462,16 +428,15 @@ export default function DashboardOrganizador() {
         </div>
         <div style={styles.navRight}>
           <span style={{ color: '#a0aec0', fontSize: '0.85rem' }}>Olá, <strong>{organizadorNome}</strong></span>
-          <button onClick={() => { setErroModalEvento(''); setModalCriarAberto(true); }} style={styles.btnNovoEvento}>
+          <button onClick={abrirModalCriar} style={styles.btnNovoEvento}>
             + Criar novo evento
           </button>
           <button onClick={handleLogout} style={styles.btnLogout}>Sair</button>
         </div>
       </header>
 
-      {/* Estrutura Principal */}
       <div style={styles.contentLayout}>
-        {/* Painel Lateral: Lista de Eventos */}
+        {/* Barra lateral: lista de eventos */}
         <aside style={styles.sidebarEventos}>
           <div style={styles.sidebarHeader}>
             <h3 style={styles.sidebarTitle}>Meus torneios</h3>
@@ -483,7 +448,7 @@ export default function DashboardOrganizador() {
           ) : eventos.length === 0 ? (
             <div style={styles.emptySidebar}>
               <p style={{ color: '#718096', fontSize: '0.85rem', margin: 0 }}>Nenhum torneio criado ainda.</p>
-              <button onClick={() => setModalCriarAberto(true)} style={styles.btnCriarPrimeiro}>Criar primeiro evento</button>
+              <button onClick={abrirModalCriar} style={styles.btnCriarPrimeiro}>Criar primeiro evento</button>
             </div>
           ) : (
             eventos.map((ev) => {
@@ -506,7 +471,6 @@ export default function DashboardOrganizador() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setEventoParaExcluir(ev);
-                        setModalExcluirEventoAberto(true);
                       }}
                       style={styles.btnExcluirEventoMini}
                       title="Excluir evento"
@@ -515,7 +479,7 @@ export default function DashboardOrganizador() {
                     </button>
                   </div>
                   <div style={styles.eventoCardMeta}>
-                    <span>📅 {formatarParaExibicao(ev.dataInicio)}</span>
+                    <span>📅 {dataIsoParaBr(ev.dataInicio)}</span>
                     <span>📍 {ev.localizacao || 'Local a definir'}</span>
                   </div>
                 </div>
@@ -524,63 +488,41 @@ export default function DashboardOrganizador() {
           )}
         </aside>
 
-        {/* Área de Gestão do Torneio Selecionado */}
+        {/* Gestão do evento selecionado */}
         <main style={styles.mainGestao}>
           {eventoSelecionado ? (
             <>
-              {/* Cabeçalho do Evento Selecionado */}
               <div style={styles.eventoHeader}>
                 <div>
                   <span style={styles.labelSub}>Painel de auditoria do evento</span>
                   <h1 style={styles.eventoNomeTitulo}>{eventoSelecionado.nome}</h1>
                   <p style={styles.eventoInfoDetalhe}>
-                    📍 {eventoSelecionado.localizacao || 'Arena Oficial'} • 📅 Data: <strong>{formatarParaExibicao(eventoSelecionado.dataInicio)}</strong>
+                    📍 {eventoSelecionado.localizacao || 'Arena Oficial'} • 📅 Data: <strong>{dataIsoParaBr(eventoSelecionado.dataInicio)}</strong>
                   </p>
                 </div>
 
-                {/* Caixa de Critérios de Promoção */}
                 <div style={styles.regrasBox}>
                   <span style={styles.regrasTitulo}>Critérios para promoção obrigatória:</span>
                   <div style={styles.regrasCheckboxesContainer}>
-                    <label style={styles.checkboxRegraInline}>
-                      <input
-                        type="checkbox"
-                        checked={eventoSelecionado.regraCampeaoSobe}
-                        onChange={() => handleToggleRegra('regraCampeaoSobe')}
-                      />
-                      <span>Já foi campeão</span>
-                    </label>
-
-                    <label style={styles.checkboxRegraInline}>
-                      <input
-                        type="checkbox"
-                        checked={eventoSelecionado.regraTresPodiosSobe}
-                        onChange={() => handleToggleRegra('regraTresPodiosSobe')}
-                      />
-                      <span>3 pódios na categoria</span>
-                    </label>
-
-                    <label style={styles.checkboxRegraInline}>
-                      <input
-                        type="checkbox"
-                        checked={eventoSelecionado.regraTresParticipacoesSobe}
-                        onChange={() => handleToggleRegra('regraTresParticipacoesSobe')}
-                      />
-                      <span>3 participações</span>
-                    </label>
+                    {REGRAS.map(({ campo, rotuloCurto }) => (
+                      <label key={campo} style={styles.checkboxRegraInline}>
+                        <input
+                          type="checkbox"
+                          checked={eventoSelecionado[campo]}
+                          onChange={() => handleToggleRegra(campo)}
+                        />
+                        <span>{rotuloCurto}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              {/* Categorias do Evento */}
+              {/* Categorias do evento */}
               <div style={styles.categoriasNavContainer}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <span style={styles.categoriasNavLabel}>Categorias do evento:</span>
-                  <button
-                    type="button"
-                    onClick={() => setModalAddCatAberto(true)}
-                    style={styles.btnAdicionarCategoria}
-                  >
+                  <button type="button" onClick={() => setModalAddCatAberto(true)} style={styles.btnAdicionarCategoria}>
                     + Adicionar categoria
                   </button>
                 </div>
@@ -606,19 +548,15 @@ export default function DashboardOrganizador() {
                             fontSize: '0.82rem'
                           }}
                         >
-                          {cat.formato} • {cat.genero} • {cat.nivel}
+                          {descreverCategoria(cat)}
                         </span>
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             setCategoriaParaExcluir(cat);
-                            setModalExcluirCatAberto(true);
                           }}
-                          style={{
-                            ...styles.btnExcluirCatPill,
-                            color: ativa ? '#7a0000' : '#ff4444'
-                          }}
+                          style={{ ...styles.btnExcluirCatPill, color: ativa ? '#7a0000' : '#ff4444' }}
                           title="Excluir categoria do evento"
                         >
                           ✕
@@ -629,7 +567,7 @@ export default function DashboardOrganizador() {
                 </div>
               </div>
 
-              {/* Gestão das Inscrições */}
+              {/* Inscrições da categoria selecionada */}
               {categoriaSelecionada && (
                 <div style={styles.gestaoInscricoesCard}>
                   <div style={styles.inscricaoHeader}>
@@ -643,7 +581,6 @@ export default function DashboardOrganizador() {
                     </div>
                   </div>
 
-                  {/* Campo de Busca de Atletas */}
                   <div style={styles.formInserirAtleta}>
                     <div style={{ position: 'relative', width: '100%' }}>
                       <input
@@ -655,20 +592,16 @@ export default function DashboardOrganizador() {
                         style={styles.inputBusca}
                       />
 
-                      {sugestoesAtletas.length > 0 && (
+                      {sugestoesVisiveis.length > 0 && (
                         <div style={styles.dropdownSugestoes}>
-                          {sugestoesAtletas.map((a) => (
-                            <div
-                              key={a.id}
-                              onClick={() => handleInscreverAtletaDireto(a)}
-                              style={styles.dropdownItem}
-                            >
+                          {sugestoesVisiveis.map((a) => (
+                            <div key={a.id} onClick={() => handleInscreverAtleta(a)} style={styles.dropdownItem}>
                               <div>
                                 <span style={styles.dropdownNome}>
                                   {a.nomeCompleto}{' '}
                                   {a.cpf && (
                                     <span style={{ fontSize: '0.78rem', color: '#00bfff', fontWeight: 'normal' }}>
-                                      (CPF: {formatarCpfParaExibicao(a.cpf)})
+                                      (CPF: {formatarCpf(a.cpf)})
                                     </span>
                                   )}
                                   <span style={{ fontSize: '0.75rem', color: '#ffd700', marginLeft: '8px', fontWeight: 'bold' }}>
@@ -685,23 +618,12 @@ export default function DashboardOrganizador() {
                     </div>
                   </div>
 
-                  {/* Alerta de Feedback */}
                   {feedbackInscricao.texto && (
-                    <div style={{
-                      ...styles.feedbackBox,
-                      backgroundColor: feedbackInscricao.tipo === 'sucesso'
-                        ? 'rgba(0, 255, 136, 0.1)'
-                        : feedbackInscricao.tipo === 'aviso'
-                        ? 'rgba(255, 215, 0, 0.1)'
-                        : 'rgba(255, 68, 68, 0.1)',
-                      color: feedbackInscricao.tipo === 'sucesso' ? '#00ff88' : feedbackInscricao.tipo === 'aviso' ? '#ffd700' : '#ff4444',
-                      borderColor: feedbackInscricao.tipo === 'sucesso' ? '#00ff88' : feedbackInscricao.tipo === 'aviso' ? '#ffd700' : '#ff4444'
-                    }}>
+                    <div style={{ ...styles.feedbackBox, ...estiloFeedback(feedbackInscricao.tipo) }}>
                       {feedbackInscricao.texto}
                     </div>
                   )}
 
-                  {/* Tabela de Atletas Inscritos */}
                   <div style={styles.tabelaWrapper}>
                     <table style={styles.tabela}>
                       <thead>
@@ -724,7 +646,7 @@ export default function DashboardOrganizador() {
                         ) : (
                           inscritos.map((ins) => {
                             const isRegular = ins.statusElegibilidade === 'REGULAR';
-                            const recCat = ins.categoriaRecomendada || (isRegular ? categoriaSelecionada.nivel : 'Consulte regras');
+                            const categoriaRecomendada = ins.categoriaRecomendada || (isRegular ? categoriaSelecionada.nivel : 'Consulte regras');
 
                             return (
                               <tr key={ins.id} style={styles.tr}>
@@ -736,9 +658,7 @@ export default function DashboardOrganizador() {
                                   <small style={{ color: '#718096' }}>({ins.atleta?.cidade}/{ins.atleta?.estado})</small>
                                 </td>
                                 <td style={styles.td}>
-                                  <span style={styles.badgeCategoriaRec}>
-                                    ⭐ {recCat}
-                                  </span>
+                                  <span style={styles.badgeCategoriaRec}>⭐ {categoriaRecomendada}</span>
                                 </td>
                                 <td style={styles.td}>
                                   <span style={{
@@ -755,10 +675,7 @@ export default function DashboardOrganizador() {
                                 </td>
                                 <td style={{ ...styles.td, textAlign: 'center' }}>
                                   <button
-                                    onClick={() => {
-                                      setInscricaoParaExcluir(ins);
-                                      setModalExcluirInscricaoAberto(true);
-                                    }}
+                                    onClick={() => setInscricaoParaExcluir(ins)}
                                     style={styles.btnExcluirAtleta}
                                     title="Remover da categoria"
                                   >
@@ -785,97 +702,46 @@ export default function DashboardOrganizador() {
         </main>
       </div>
 
-      {/* Modal de Confirmação: Excluir Evento */}
-      {modalExcluirEventoAberto && eventoParaExcluir && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContentSmall}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#ff4444', margin: 0, fontSize: '1.15rem' }}>Excluir evento</h3>
-              <button type="button" onClick={() => setModalExcluirEventoAberto(false)} style={styles.btnFecharModal}>✕</button>
-            </div>
-            
-            <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5', margin: '14px 0 20px 0' }}>
-              Tem certeza de que deseja excluir o evento <strong>{eventoParaExcluir.nome}</strong> em definitivo? Todas as categorias e inscrições vinculadas serão apagadas.
-            </p>
-
-            <div style={styles.modalActions}>
-              <button type="button" onClick={() => setModalExcluirEventoAberto(false)} style={styles.btnCancelar}>
-                Cancelar
-              </button>
-              <button 
-                type="button" 
-                disabled={processandoAcao}
-                onClick={confirmarExclusaoEvento} 
-                style={styles.btnConfirmarExclusao}
-              >
-                {processandoAcao ? 'Excluindo...' : 'Sim, excluir evento'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {eventoParaExcluir && (
+        <ModalConfirmacao
+          titulo="Excluir evento"
+          textoConfirmar="Sim, excluir evento"
+          textoProcessando="Excluindo..."
+          processando={processandoAcao}
+          onConfirmar={confirmarExclusaoEvento}
+          onCancelar={() => setEventoParaExcluir(null)}
+        >
+          Tem certeza de que deseja excluir o evento <strong>{eventoParaExcluir.nome}</strong> em definitivo? Todas as categorias e inscrições vinculadas serão apagadas.
+        </ModalConfirmacao>
       )}
 
-      {/* Modal de Confirmação: Excluir Categoria */}
-      {modalExcluirCatAberto && categoriaParaExcluir && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContentSmall}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#ff4444', margin: 0, fontSize: '1.15rem' }}>Excluir categoria</h3>
-              <button type="button" onClick={() => setModalExcluirCatAberto(false)} style={styles.btnFecharModal}>✕</button>
-            </div>
-            
-            <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5', margin: '14px 0 20px 0' }}>
-              Tem certeza de que deseja remover a categoria <strong>{categoriaParaExcluir.formato} • {categoriaParaExcluir.genero} • {categoriaParaExcluir.nivel}</strong> deste torneio?
-            </p>
-
-            <div style={styles.modalActions}>
-              <button type="button" onClick={() => setModalExcluirCatAberto(false)} style={styles.btnCancelar}>
-                Cancelar
-              </button>
-              <button 
-                type="button" 
-                disabled={processandoAcao}
-                onClick={confirmarExclusaoCategoria} 
-                style={styles.btnConfirmarExclusao}
-              >
-                {processandoAcao ? 'Excluindo...' : 'Sim, excluir categoria'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {categoriaParaExcluir && (
+        <ModalConfirmacao
+          titulo="Excluir categoria"
+          textoConfirmar="Sim, excluir categoria"
+          textoProcessando="Excluindo..."
+          processando={processandoAcao}
+          onConfirmar={confirmarExclusaoCategoria}
+          onCancelar={() => setCategoriaParaExcluir(null)}
+        >
+          Tem certeza de que deseja remover a categoria <strong>{descreverCategoria(categoriaParaExcluir)}</strong> deste torneio?
+        </ModalConfirmacao>
       )}
 
-      {/* Modal de Confirmação: Excluir Inscrição de Atleta */}
-      {modalExcluirInscricaoAberto && inscricaoParaExcluir && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContentSmall}>
-            <div style={styles.modalHeader}>
-              <h3 style={{ color: '#ff4444', margin: 0, fontSize: '1.15rem' }}>Remover atleta da categoria</h3>
-              <button type="button" onClick={() => setModalExcluirInscricaoAberto(false)} style={styles.btnFecharModal}>✕</button>
-            </div>
-            
-            <p style={{ color: '#cbd5e0', fontSize: '0.9rem', lineHeight: '1.5', margin: '14px 0 20px 0' }}>
-              Tem certeza de que deseja remover o atleta <strong>{inscricaoParaExcluir.atleta?.nomeCompleto}</strong> desta categoria?
-            </p>
-
-            <div style={styles.modalActions}>
-              <button type="button" onClick={() => setModalExcluirInscricaoAberto(false)} style={styles.btnCancelar}>
-                Cancelar
-              </button>
-              <button 
-                type="button" 
-                disabled={processandoAcao}
-                onClick={confirmarExclusaoAtleta} 
-                style={styles.btnConfirmarExclusao}
-              >
-                {processandoAcao ? 'Removendo...' : 'Sim, remover atleta'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {inscricaoParaExcluir && (
+        <ModalConfirmacao
+          titulo="Remover atleta da categoria"
+          textoConfirmar="Sim, remover atleta"
+          textoProcessando="Removendo..."
+          processando={processandoAcao}
+          onConfirmar={confirmarExclusaoInscricao}
+          onCancelar={() => setInscricaoParaExcluir(null)}
+        >
+          Tem certeza de que deseja remover o atleta <strong>{inscricaoParaExcluir.atleta?.nomeCompleto}</strong> desta categoria?
+        </ModalConfirmacao>
       )}
 
-      {/* Modal: Adicionar Categoria a Evento Existente */}
+      {/* Modal: adicionar categoria a evento existente */}
       {modalAddCatAberto && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContentSmall}>
@@ -892,10 +758,7 @@ export default function DashboardOrganizador() {
                   onChange={(e) => setNovaCatExistente({ ...novaCatExistente, formato: e.target.value })}
                   style={styles.select}
                 >
-                  <option value="Individual">Individual</option>
-                  <option value="Dupla">Dupla</option>
-                  <option value="Trio">Trio</option>
-                  <option value="Time">Time</option>
+                  <Opcoes valores={FORMATOS} />
                 </select>
               </div>
 
@@ -906,9 +769,7 @@ export default function DashboardOrganizador() {
                   onChange={(e) => setNovaCatExistente({ ...novaCatExistente, genero: e.target.value })}
                   style={styles.select}
                 >
-                  <option value="Masculino">Masculino</option>
-                  <option value="Feminino">Feminino</option>
-                  <option value="Misto">Misto</option>
+                  <Opcoes valores={GENEROS} />
                 </select>
               </div>
 
@@ -919,12 +780,7 @@ export default function DashboardOrganizador() {
                   onChange={(e) => setNovaCatExistente({ ...novaCatExistente, nivel: e.target.value })}
                   style={styles.select}
                 >
-                  <option value="Iniciante">Iniciante</option>
-                  <option value="Scale">Scale</option>
-                  <option value="Intermediário">Intermediário</option>
-                  <option value="RX">RX</option>
-                  <option value="Elite">Elite</option>
-                  <option value="Master">Master</option>
+                  <Opcoes valores={NIVEIS} />
                 </select>
               </div>
 
@@ -941,26 +797,16 @@ export default function DashboardOrganizador() {
         </div>
       )}
 
-      {/* Modal: Criação de Novo Evento */}
+      {/* Modal: criação de novo evento */}
       {modalCriarAberto && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
             <div style={styles.modalHeader}>
               <h2 style={{ color: '#00bfff', margin: 0, fontSize: '1.3rem' }}>Criar torneio esportivo</h2>
-              <button 
-                type="button" 
-                onClick={() => { setModalCriarAberto(false); setErroModalEvento(''); }} 
-                style={styles.btnFecharModal}
-              >
-                ✕
-              </button>
+              <button type="button" onClick={fecharModalCriar} style={styles.btnFecharModal}>✕</button>
             </div>
 
-            {erroModalEvento && (
-              <div style={styles.modalAlertErro}>
-                ⚠️ {erroModalEvento}
-              </div>
-            )}
+            {erroModalEvento && <div style={styles.modalAlertErro}>⚠️ {erroModalEvento}</div>}
 
             <form onSubmit={handleSalvarNovoEvento} style={styles.modalForm}>
               <div style={styles.inputGroup}>
@@ -969,10 +815,7 @@ export default function DashboardOrganizador() {
                   type="text"
                   placeholder="Ex: Torneio CrossFit Rio 2026"
                   value={novoEvento.nome}
-                  onChange={(e) => {
-                    setNovoEvento({ ...novoEvento, nome: e.target.value });
-                    setErroModalEvento('');
-                  }}
+                  onChange={(e) => alterarNovoEvento('nome', e.target.value)}
                   required
                   style={styles.input}
                 />
@@ -986,10 +829,7 @@ export default function DashboardOrganizador() {
                     placeholder="DD/MM/AAAA"
                     maxLength={10}
                     value={novoEvento.dataInicio}
-                    onChange={(e) => {
-                      setNovoEvento({ ...novoEvento, dataInicio: maskDate(e.target.value) });
-                      setErroModalEvento('');
-                    }}
+                    onChange={(e) => alterarNovoEvento('dataInicio', mascaraData(e.target.value))}
                     required
                     style={styles.input}
                   />
@@ -1001,10 +841,7 @@ export default function DashboardOrganizador() {
                     placeholder="DD/MM/AAAA"
                     maxLength={10}
                     value={novoEvento.dataFim}
-                    onChange={(e) => {
-                      setNovoEvento({ ...novoEvento, dataFim: maskDate(e.target.value) });
-                      setErroModalEvento('');
-                    }}
+                    onChange={(e) => alterarNovoEvento('dataFim', mascaraData(e.target.value))}
                     style={styles.input}
                   />
                 </div>
@@ -1016,44 +853,25 @@ export default function DashboardOrganizador() {
                   type="text"
                   placeholder="Ex: Ginásio Caio Martins - Niterói, RJ"
                   value={novoEvento.localizacao}
-                  onChange={(e) => {
-                    setNovoEvento({ ...novoEvento, localizacao: e.target.value });
-                    setErroModalEvento('');
-                  }}
+                  onChange={(e) => alterarNovoEvento('localizacao', e.target.value)}
                   style={styles.input}
                 />
               </div>
 
-              {/* Critérios Iniciais */}
               <div style={styles.regrasSection}>
                 <span style={{ ...styles.label, color: '#00bfff' }}>Selecione os critérios para subir de categoria:</span>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={novoEvento.regraCampeaoSobe}
-                    onChange={(e) => setNovoEvento({ ...novoEvento, regraCampeaoSobe: e.target.checked })}
-                  />
-                  <span>Já foi campeão na categoria anterior</span>
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={novoEvento.regraTresPodiosSobe}
-                    onChange={(e) => setNovoEvento({ ...novoEvento, regraTresPodiosSobe: e.target.checked })}
-                  />
-                  <span>Já conquistou 3 pódios na categoria anterior</span>
-                </label>
-                <label style={styles.checkboxLabel}>
-                  <input
-                    type="checkbox"
-                    checked={novoEvento.regraTresParticipacoesSobe}
-                    onChange={(e) => setNovoEvento({ ...novoEvento, regraTresParticipacoesSobe: e.target.checked })}
-                  />
-                  <span>Já participou 3x da mesma categoria</span>
-                </label>
+                {REGRAS.map(({ campo, rotuloLongo }) => (
+                  <label key={campo} style={styles.checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={novoEvento[campo]}
+                      onChange={(e) => alterarNovoEvento(campo, e.target.checked)}
+                    />
+                    <span>{rotuloLongo}</span>
+                  </label>
+                ))}
               </div>
 
-              {/* Construtor de Categorias na Criação */}
               <div style={styles.categoriasBuilder}>
                 <span style={styles.label}>Categorias do torneio:</span>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -1062,10 +880,7 @@ export default function DashboardOrganizador() {
                     onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, formato: e.target.value })}
                     style={styles.select}
                   >
-                    <option value="Individual">Individual</option>
-                    <option value="Dupla">Dupla</option>
-                    <option value="Trio">Trio</option>
-                    <option value="Time">Time</option>
+                    <Opcoes valores={FORMATOS} />
                   </select>
 
                   <select
@@ -1073,9 +888,7 @@ export default function DashboardOrganizador() {
                     onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, genero: e.target.value })}
                     style={styles.select}
                   >
-                    <option value="Masculino">Masculino</option>
-                    <option value="Feminino">Feminino</option>
-                    <option value="Misto">Misto</option>
+                    <Opcoes valores={GENEROS} />
                   </select>
 
                   <select
@@ -1083,20 +896,12 @@ export default function DashboardOrganizador() {
                     onChange={(e) => setNovaCatCriacao({ ...novaCatCriacao, nivel: e.target.value })}
                     style={styles.select}
                   >
-                    <option value="Iniciante">Iniciante</option>
-                    <option value="Scale">Scale</option>
-                    <option value="Intermediário">Intermediário</option>
-                    <option value="RX">RX</option>
-                    <option value="Elite">Elite</option>
-                    <option value="Master">Master</option>
+                    <Opcoes valores={NIVEIS} />
                   </select>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setNovoEvento(prev => ({ ...prev, categorias: [...prev.categorias, { ...novaCatCriacao }] }));
-                      setErroModalEvento('');
-                    }}
+                    onClick={() => alterarNovoEvento('categorias', [...novoEvento.categorias, { ...novaCatCriacao }])}
                     style={styles.btnAddCat}
                   >
                     + Adicionar
@@ -1106,10 +911,10 @@ export default function DashboardOrganizador() {
                 <div style={styles.categoriasListChips}>
                   {novoEvento.categorias.map((c, i) => (
                     <span key={i} style={styles.catChip}>
-                      {c.formato} • {c.genero} • {c.nivel}
+                      {descreverCategoria(c)}
                       <button
                         type="button"
-                        onClick={() => setNovoEvento(prev => ({ ...prev, categorias: prev.categorias.filter((_, idx) => idx !== i) }))}
+                        onClick={() => alterarNovoEvento('categorias', novoEvento.categorias.filter((_, idx) => idx !== i))}
                         style={styles.btnRemoverChip}
                       >
                         ✕
@@ -1120,18 +925,10 @@ export default function DashboardOrganizador() {
               </div>
 
               <div style={styles.modalActions}>
-                <button 
-                  type="button" 
-                  onClick={() => { setModalCriarAberto(false); setErroModalEvento(''); }} 
-                  style={styles.btnCancelar}
-                >
+                <button type="button" onClick={fecharModalCriar} style={styles.btnCancelar}>
                   Cancelar
                 </button>
-                <button 
-                  type="submit" 
-                  disabled={salvando}
-                  style={styles.btnSalvarTorneio}
-                >
+                <button type="submit" disabled={salvando} style={styles.btnSalvarTorneio}>
                   {salvando ? 'Salvando...' : 'Concluir e salvar torneio'}
                 </button>
               </div>

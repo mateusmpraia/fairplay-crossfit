@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import api, { encerrarSessao } from '../api';
+import { estiloFeedback } from '../tema';
+
+const FILTROS_PERFIL = ['TODOS', 'ATLETA', 'ORGANIZADOR'];
 
 export default function AdminUsuarios() {
   const navigate = useNavigate();
@@ -12,45 +15,33 @@ export default function AdminUsuarios() {
   const [usuarioParaExcluir, setUsuarioParaExcluir] = useState(null);
 
   useEffect(() => {
-    carregarUsuarios();
+    api.get('/admin/usuarios')
+      .then(({ data }) => setUsuarios(data || []))
+      .catch(() => setMensagem({ tipo: 'erro', texto: 'Erro ao carregar lista de usuários.' }))
+      .finally(() => setCarregando(false));
   }, []);
 
-  const carregarUsuarios = async () => {
-    try {
-      setCarregando(true);
-      const res = await axios.get('http://localhost:8080/api/admin/usuarios');
-      setUsuarios(res.data || []);
-    } catch (err) {
-      setMensagem({ tipo: 'erro', texto: 'Erro ao carregar lista de usuários.' });
-    } finally {
-      setCarregando(false);
-    }
-  };
-
   const handleExcluir = async () => {
-    if (!usuarioParaExcluir) return;
-
+    const usuario = usuarioParaExcluir;
     try {
-      await axios.delete(`http://localhost:8080/api/admin/usuarios/${usuarioParaExcluir.id}`);
-      setMensagem({ tipo: 'sucesso', texto: `Usuário "${usuarioParaExcluir.nomeCompleto}" excluído com sucesso!` });
+      await api.delete(`/admin/usuarios/${usuario.id}`);
+      setUsuarios((prev) => prev.filter((u) => u.id !== usuario.id));
+      setMensagem({ tipo: 'sucesso', texto: `Usuário "${usuario.nomeCompleto}" excluído com sucesso!` });
       setUsuarioParaExcluir(null);
-      carregarUsuarios();
-    } catch (err) {
+    } catch {
       setMensagem({ tipo: 'erro', texto: 'Não foi possível excluir o usuário.' });
     }
   };
 
+  const termo = busca.toLowerCase();
   const usuariosFiltrados = usuarios.filter((u) => {
-    const termo = busca.toLowerCase();
-    const bateNomeOuEmail = 
-      (u.nomeCompleto && u.nomeCompleto.toLowerCase().includes(termo)) ||
-      (u.email && u.email.toLowerCase().includes(termo)) ||
-      (u.cpf && u.cpf.includes(termo)) ||
-      (u.nomeBox && u.nomeBox.toLowerCase().includes(termo));
-
+    const bateBusca =
+      u.nomeCompleto?.toLowerCase().includes(termo) ||
+      u.email?.toLowerCase().includes(termo) ||
+      u.cpf?.includes(termo) ||
+      u.nomeBox?.toLowerCase().includes(termo);
     const batePerfil = filtroPerfil === 'TODOS' || u.perfil === filtroPerfil;
-
-    return bateNomeOuEmail && batePerfil;
+    return bateBusca && batePerfil;
   });
 
   return (
@@ -61,7 +52,7 @@ export default function AdminUsuarios() {
           <span style={styles.brand}>FAIRPLAY</span>
           <span style={styles.adminBadge}>PAINEL ADMINISTRATIVO</span>
         </div>
-        <button onClick={() => navigate('/login')} style={styles.btnVoltar}>
+        <button onClick={() => { encerrarSessao(); navigate('/login'); }} style={styles.btnVoltar}>
           Voltar ao Sistema
         </button>
       </header>
@@ -78,17 +69,12 @@ export default function AdminUsuarios() {
         </div>
 
         {mensagem.texto && (
-          <div style={{
-            ...styles.alert,
-            backgroundColor: mensagem.tipo === 'sucesso' ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)',
-            borderColor: mensagem.tipo === 'sucesso' ? '#00ff88' : '#ff4444',
-            color: mensagem.tipo === 'sucesso' ? '#00ff88' : '#ff4444',
-          }}>
+          <div style={{ ...styles.alert, ...estiloFeedback(mensagem.tipo) }}>
             {mensagem.texto}
           </div>
         )}
 
-        {/* Filtros e Busca */}
+        {/* Filtros e busca */}
         <div style={styles.filterBar}>
           <input
             type="text"
@@ -98,7 +84,7 @@ export default function AdminUsuarios() {
             style={styles.searchInput}
           />
           <div style={styles.tabButtons}>
-            {['TODOS', 'ATLETA', 'ORGANIZADOR'].map((perfil) => (
+            {FILTROS_PERFIL.map((perfil) => (
               <button
                 key={perfil}
                 onClick={() => setFiltroPerfil(perfil)}
