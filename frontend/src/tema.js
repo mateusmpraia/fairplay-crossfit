@@ -14,8 +14,8 @@ export const corDoPerfil = (perfil) => (perfil === 'ORGANIZADOR' ? CORES.organiz
 /** Imagem do banner lateral das telas de login e cadastro. */
 export const imagemDoPerfil = (perfil) =>
   perfil === 'ORGANIZADOR'
-    ? 'https://images.pexels.com/photos/618612/pexels-photo-618612.jpeg?v=2&auto=compress&cs=tinysrgb&w=1000'
-    : 'https://images.pexels.com/photos/1552242/pexels-photo-1552242.jpeg?auto=compress&cs=tinysrgb&w=1000';
+    ? 'https://images.pexels.com/photos/32546042/pexels-photo-32546042.jpeg?auto=compress&cs=tinysrgb&w=1000'
+    : 'https://images.pexels.com/photos/36389486/pexels-photo-36389486.jpeg?auto=compress&cs=tinysrgb&w=1000';
 
 const FUNDOS_FEEDBACK = {
   sucesso: 'rgba(0, 255, 136, 0.1)',
