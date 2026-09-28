@@ -5,7 +5,6 @@ import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
 import br.com.uff.fairplay.dto.LancarResultadosDTO;
-import br.com.uff.fairplay.dto.ResultadoEventoDTO;
 import br.com.uff.fairplay.dto.ResultadoInscricaoLoteDTO;
 import br.com.uff.fairplay.exception.AcessoNegadoException;
 import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
@@ -14,6 +13,7 @@ import br.com.uff.fairplay.model.*;
 import br.com.uff.fairplay.repository.*;
 import br.com.uff.fairplay.service.RegrasElegibilidade.CriteriosEvento;
 import br.com.uff.fairplay.service.RegrasElegibilidade.ResultadoAuditoria;
+import br.com.uff.fairplay.service.historico.HistoricoCompeticaoFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,17 +44,20 @@ public class EventoService {
     private final InscricaoEventoRepository inscricaoEventoRepository;
     private final AtletaRepository atletaRepository;
     private final HistoricoAtletaRepository historicoAtletaRepository;
+    private final HistoricoCompeticaoFactory historicoFactory;
 
     public EventoService(EventoRepository eventoRepository,
                          CategoriaEventoRepository categoriaEventoRepository,
                          InscricaoEventoRepository inscricaoEventoRepository,
                          AtletaRepository atletaRepository,
-                         HistoricoAtletaRepository historicoAtletaRepository) {
+                         HistoricoAtletaRepository historicoAtletaRepository,
+                         HistoricoCompeticaoFactory historicoFactory) {
         this.eventoRepository = eventoRepository;
         this.categoriaEventoRepository = categoriaEventoRepository;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.atletaRepository = atletaRepository;
         this.historicoAtletaRepository = historicoAtletaRepository;
+        this.historicoFactory = historicoFactory;
     }
 
     // ---------------------------------------------------------------- Eventos e categorias
@@ -338,30 +341,9 @@ public class EventoService {
         Evento evento = categoriaAlvo.getEvento();
         CriteriosEvento criterios = new CriteriosEvento(
                 evento.isRegraCampeaoSobe(), evento.isRegraTresPodiosSobe(), evento.isRegraTresParticipacoesSobe());
-        return RegrasElegibilidade.auditar(categoriaAlvo.getNivel(), criterios, buscarParticipacoes(atleta, evento.getId()));
-    }
-
-    /**
-     * Participações do atleta consideradas na auditoria: colocações em outros eventos do FairPlay
-     * (o próprio evento auditado fica de fora) e o histórico importado (vinculado ou com o mesmo nome).
-     */
-    private List<Participacao> buscarParticipacoes(Atleta atleta, Long eventoAuditadoId) {
-        List<Participacao> participacoes = new ArrayList<>();
-
-        for (ResultadoEventoDTO r : inscricaoEventoRepository.buscarResultadosDoAtleta(atleta.getId())) {
-            if (!r.eventoId().equals(eventoAuditadoId) && r.nivel() != null) {
-                participacoes.add(new Participacao(r.nivel(), r.colocacao()));
-            }
-        }
-
-        for (HistoricoAtleta h : historicoAtletaRepository.buscarHistoricoPorAtletaIdOuNome(atleta.getId(), atleta.getNomeCompleto())) {
-            CategoriaCompeticao categoria = CategoriaCompeticao.fromString(h.getCategoriaPadronizada());
-            if (categoria != null && h.getColocacao() != null) {
-                participacoes.add(new Participacao(categoria, h.getColocacao()));
-            }
-        }
-
-        return participacoes;
+        // O histórico chega pronto da factory (adapters de todas as origens), sem o próprio evento auditado
+        List<Participacao> participacoes = historicoFactory.paraAuditoria(atleta, evento).participacoes();
+        return RegrasElegibilidade.auditar(categoriaAlvo.getNivel(), criterios, participacoes);
     }
 
     private static String apenasDigitos(String valor) {
