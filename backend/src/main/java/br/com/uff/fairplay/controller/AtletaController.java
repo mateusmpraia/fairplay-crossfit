@@ -9,12 +9,9 @@ import br.com.uff.fairplay.exception.AcessoNegadoException;
 import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
 import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.Atleta;
-import br.com.uff.fairplay.model.CategoriaCompeticao;
-import br.com.uff.fairplay.model.ResultadoCampeonato;
 import br.com.uff.fairplay.repository.AtletaRepository;
 import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
 import br.com.uff.fairplay.repository.InscricaoEventoRepository;
-import br.com.uff.fairplay.repository.ResultadoCampeonatoRepository;
 import br.com.uff.fairplay.security.SessaoService;
 import br.com.uff.fairplay.security.UsuarioLogado;
 import br.com.uff.fairplay.service.RecomendacaoCategoriaService;
@@ -27,7 +24,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,7 +36,6 @@ public class AtletaController {
     private static final List<String> PERFIS_COM_LOGIN = List.of(Atleta.PERFIL_ATLETA, Atleta.PERFIL_ORGANIZADOR);
 
     private final AtletaRepository atletaRepository;
-    private final ResultadoCampeonatoRepository resultadoRepository;
     private final RecomendacaoCategoriaService recomendacaoCategoriaService;
     private final HistoricoAtletaRepository historicoAtletaRepository;
     private final InscricaoEventoRepository inscricaoEventoRepository;
@@ -48,14 +43,12 @@ public class AtletaController {
     private final SessaoService sessaoService;
 
     public AtletaController(AtletaRepository atletaRepository,
-                            ResultadoCampeonatoRepository resultadoRepository,
                             RecomendacaoCategoriaService recomendacaoCategoriaService,
                             HistoricoAtletaRepository historicoAtletaRepository,
                             InscricaoEventoRepository inscricaoEventoRepository,
                             PasswordEncoder passwordEncoder,
                             SessaoService sessaoService) {
         this.atletaRepository = atletaRepository;
-        this.resultadoRepository = resultadoRepository;
         this.recomendacaoCategoriaService = recomendacaoCategoriaService;
         this.historicoAtletaRepository = historicoAtletaRepository;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
@@ -149,19 +142,6 @@ public class AtletaController {
     public ResponseEntity<List<MinhaInscricaoDTO>> minhasInscricoes(@PathVariable Long id, @AuthenticationPrincipal UsuarioLogado usuario) {
         exigirProprioAtleta(id, usuario);
         return ResponseEntity.ok(inscricaoEventoRepository.buscarInscricoesDoAtleta(id));
-    }
-
-    /** Lança manualmente um resultado de campeonato para o atleta. Só o administrador (não usado pelo frontend). */
-    @PostMapping("/{id}/resultados")
-    public ResponseEntity<ResultadoCampeonato> adicionarResultado(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        ResultadoCampeonato resultado = new ResultadoCampeonato();
-        resultado.setAtleta(buscarAtleta(id));
-        resultado.setNomeCampeonato((String) body.get("nomeCampeonato"));
-        resultado.setDataCampeonato(LocalDate.parse((String) body.get("dataCampeonato")));
-        resultado.setCategoria(CategoriaCompeticao.fromString((String) body.get("categoria")));
-        resultado.setColocacao(Integer.parseInt(body.get("colocacao").toString()));
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(resultadoRepository.save(resultado));
     }
 
     /** Atualiza nome e/ou box do atleta; campos vazios são ignorados. */

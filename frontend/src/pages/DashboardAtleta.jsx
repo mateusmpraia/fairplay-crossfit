@@ -16,7 +16,6 @@ const PODIO = {
 /** De onde veio cada linha do histórico. */
 const ORIGENS = {
   EVENTO: { texto: 'Evento FairPlay', cor: '#00ff88' },
-  MANUAL: { texto: 'Lançamento manual', cor: '#00bfff' },
   HISTORICO: { texto: 'Histórico importado', cor: '#8b949e' },
 };
 
@@ -229,7 +228,7 @@ export default function DashboardAtleta() {
           )}
         </section>
 
-        {/* Histórico de resultados (eventos do FairPlay, lançamentos manuais e histórico importado) */}
+        {/* Histórico de resultados (eventos do FairPlay e histórico importado) */}
         <section style={styles.tableCard}>
           <div style={styles.tableHeader}>
             <h2 style={styles.tableTitle}>Histórico de Participações</h2>

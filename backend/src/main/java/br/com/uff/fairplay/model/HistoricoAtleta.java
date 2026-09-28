@@ -30,7 +30,4 @@ public class HistoricoAtleta {
 
     @Column(name = "box_origem")
     private String boxOrigem;
-
-    @Column(name = "atleta_id")
-    private Long atletaId;
 }

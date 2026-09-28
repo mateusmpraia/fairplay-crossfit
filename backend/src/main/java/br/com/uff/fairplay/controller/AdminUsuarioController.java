@@ -2,8 +2,6 @@ package br.com.uff.fairplay.controller;
 
 import br.com.uff.fairplay.dto.UsuarioAdminDTO;
 import br.com.uff.fairplay.repository.AtletaRepository;
-import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
-import br.com.uff.fairplay.repository.ResultadoCampeonatoRepository;
 import br.com.uff.fairplay.security.SessaoService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -23,21 +21,15 @@ public class AdminUsuarioController {
     private static final String PERFIL_ADMIN = "MASTER_ADMIN";
 
     private final AtletaRepository atletaRepository;
-    private final ResultadoCampeonatoRepository resultadoCampeonatoRepository;
-    private final HistoricoAtletaRepository historicoAtletaRepository;
     private final SessaoService sessaoService;
     private final String usuarioAdmin;
     private final String senhaAdmin;
 
     public AdminUsuarioController(AtletaRepository atletaRepository,
-                                  ResultadoCampeonatoRepository resultadoCampeonatoRepository,
-                                  HistoricoAtletaRepository historicoAtletaRepository,
                                   SessaoService sessaoService,
                                   @Value("${fairplay.admin.usuario}") String usuarioAdmin,
                                   @Value("${fairplay.admin.senha}") String senhaAdmin) {
         this.atletaRepository = atletaRepository;
-        this.resultadoCampeonatoRepository = resultadoCampeonatoRepository;
-        this.historicoAtletaRepository = historicoAtletaRepository;
         this.sessaoService = sessaoService;
         this.usuarioAdmin = usuarioAdmin;
         this.senhaAdmin = senhaAdmin;
@@ -78,8 +70,8 @@ public class AdminUsuarioController {
     }
 
     /**
-     * Exclui o usuário, liberando antes o histórico vinculado, apagando os resultados lançados
-     * para ele e encerrando as sessões abertas.
+     * Exclui o usuário. O banco apaga em cascata as sessões, inscrições, vínculos com o histórico
+     * (que fica livre para ser vinculado de novo) e, se for organizador, os eventos dele.
      */
     @DeleteMapping("/{id}")
     @Transactional
@@ -87,9 +79,6 @@ public class AdminUsuarioController {
         if (!atletaRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
-        historicoAtletaRepository.desvincularPorAtletaId(id);
-        resultadoCampeonatoRepository.deleteByAtletaId(id);
-        sessaoService.encerrarTodasDoUsuario(id);
         atletaRepository.deleteById(id);
         return ResponseEntity.ok("Usuário excluído com sucesso.");
     }

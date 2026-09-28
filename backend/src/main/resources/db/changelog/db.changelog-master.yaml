@@ -5,3 +5,5 @@ databaseChangeLog:
       file: db/changelog/001-esquema-inicial.sql
   - include:
       file: db/changelog/002-resultados-senhas-historico.sql
+  - include:
+      file: db/changelog/003-limpeza-e-organizacao.sql

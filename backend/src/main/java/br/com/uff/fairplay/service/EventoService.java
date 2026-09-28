@@ -43,20 +43,17 @@ public class EventoService {
     private final CategoriaEventoRepository categoriaEventoRepository;
     private final InscricaoEventoRepository inscricaoEventoRepository;
     private final AtletaRepository atletaRepository;
-    private final ResultadoCampeonatoRepository resultadoCampeonatoRepository;
     private final HistoricoAtletaRepository historicoAtletaRepository;
 
     public EventoService(EventoRepository eventoRepository,
                          CategoriaEventoRepository categoriaEventoRepository,
                          InscricaoEventoRepository inscricaoEventoRepository,
                          AtletaRepository atletaRepository,
-                         ResultadoCampeonatoRepository resultadoCampeonatoRepository,
                          HistoricoAtletaRepository historicoAtletaRepository) {
         this.eventoRepository = eventoRepository;
         this.categoriaEventoRepository = categoriaEventoRepository;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.atletaRepository = atletaRepository;
-        this.resultadoCampeonatoRepository = resultadoCampeonatoRepository;
         this.historicoAtletaRepository = historicoAtletaRepository;
     }
 
@@ -280,16 +277,18 @@ public class EventoService {
     }
 
     /**
-     * Resolve um atleta vindo do histórico importado. Se o registro ainda não tem atleta associado,
+     * Resolve um atleta vindo do histórico importado. Se o registro ainda não está vinculado a ninguém,
      * cria um atleta pendente (perfil HISTORICO) só com nome, gênero e box — sem dados de contato
-     * inventados. A pessoa pode reivindicar esse registro depois, ao se cadastrar.
+     * inventados — e vincula a ele os registros do histórico com esse nome. A pessoa pode reivindicar
+     * esse registro depois, ao se cadastrar.
      */
     private Atleta obterAtletaDoHistorico(Long historicoId, CategoriaEvento categoria) {
         HistoricoAtleta historico = historicoAtletaRepository.findById(historicoId)
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Registro do histórico não encontrado."));
 
-        if (historico.getAtletaId() != null) {
-            return atletaRepository.findById(historico.getAtletaId())
+        List<Long> vinculados = historicoAtletaRepository.buscarAtletasVinculados(historicoId);
+        if (!vinculados.isEmpty()) {
+            return atletaRepository.findById(vinculados.get(0))
                     .orElseThrow(() -> new RecursoNaoEncontradoException("Atleta vinculado não encontrado."));
         }
 
@@ -305,8 +304,7 @@ public class EventoService {
         pendente.setPerfil(Atleta.PERFIL_HISTORICO);
 
         Atleta salvo = atletaRepository.save(pendente);
-        historico.setAtletaId(salvo.getId());
-        historicoAtletaRepository.save(historico);
+        historicoAtletaRepository.vincularHistoricoAoAtleta(salvo.getId(), historico.getNomeAtleta());
         return salvo;
     }
 
@@ -340,18 +338,11 @@ public class EventoService {
     }
 
     /**
-     * Participações do atleta consideradas na auditoria: resultados lançados manualmente, colocações em
-     * outros eventos do FairPlay (o próprio evento auditado fica de fora) e o histórico importado
-     * (vinculado ou com o mesmo nome).
+     * Participações do atleta consideradas na auditoria: colocações em outros eventos do FairPlay
+     * (o próprio evento auditado fica de fora) e o histórico importado (vinculado ou com o mesmo nome).
      */
     private List<Participacao> buscarParticipacoes(Atleta atleta, Long eventoAuditadoId) {
         List<Participacao> participacoes = new ArrayList<>();
-
-        for (ResultadoCampeonato r : resultadoCampeonatoRepository.findByAtletaIdOrderByDataCampeonatoDesc(atleta.getId())) {
-            if (r.getCategoria() != null && r.getColocacao() != null) {
-                participacoes.add(new Participacao(r.getCategoria(), r.getColocacao()));
-            }
-        }
 
         for (ResultadoEventoDTO r : inscricaoEventoRepository.buscarResultadosDoAtleta(atleta.getId())) {
             if (!r.eventoId().equals(eventoAuditadoId) && r.nivel() != null) {

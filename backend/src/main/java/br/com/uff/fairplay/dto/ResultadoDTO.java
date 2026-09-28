@@ -5,7 +5,7 @@ import java.time.LocalDate;
 /**
  * Linha do histórico exibido no painel do atleta.
  *
- * @param origem EVENTO (evento do FairPlay), MANUAL (lançado pelo administrador) ou HISTORICO (importado)
+ * @param origem EVENTO (evento do FairPlay) ou HISTORICO (histórico importado)
  */
 public record ResultadoDTO(
     Long id,

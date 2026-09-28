@@ -13,21 +13,19 @@ import java.util.List;
 public interface HistoricoAtletaRepository extends JpaRepository<HistoricoAtleta, Long> {
 
     /**
-     * Histórico do atleta para a auditoria de elegibilidade: registros vinculados a ele (pela tabela de
-     * vínculos ou pela coluna atleta_id) ou com o mesmo nome.
+     * Histórico do atleta para a auditoria de elegibilidade: registros vinculados a ele ou com o mesmo nome.
      */
     @Query("""
         SELECT DISTINCT h
         FROM HistoricoAtleta h
         LEFT JOIN AtletaHistoricoVinculo v ON v.historico.id = h.id
         WHERE (v.atletaId = :atletaId)
-           OR (h.atletaId = :atletaId)
            OR (LOWER(TRIM(h.nomeAtleta)) = LOWER(TRIM(:nomeAtleta)))
         ORDER BY h.id DESC
     """)
     List<HistoricoAtleta> buscarHistoricoPorAtletaIdOuNome(@Param("atletaId") Long atletaId, @Param("nomeAtleta") String nomeAtleta);
 
-    /** Histórico exibido no painel do atleta: apenas os registros vinculados pela tabela de vínculos. */
+    /** Histórico exibido no painel do atleta: apenas os registros vinculados a ele. */
     @Query("""
         SELECT v.historico
         FROM AtletaHistoricoVinculo v
@@ -35,6 +33,10 @@ public interface HistoricoAtletaRepository extends JpaRepository<HistoricoAtleta
         ORDER BY v.historico.id DESC
     """)
     List<HistoricoAtleta> buscarHistoricoPorAtletaId(@Param("atletaId") Long atletaId);
+
+    /** Atletas vinculados a um registro do histórico (normalmente um só). */
+    @Query("SELECT v.atletaId FROM AtletaHistoricoVinculo v WHERE v.historico.id = :historicoId ORDER BY v.atletaId")
+    List<Long> buscarAtletasVinculados(@Param("historicoId") Long historicoId);
 
     /** Até 5 nomes do histórico parecidos com o termo, com os boxes e o total de competições de cada um. */
     @Query(value = """
@@ -45,7 +47,7 @@ public interface HistoricoAtletaRepository extends JpaRepository<HistoricoAtleta
                 'N/D'
             ) AS boxOrigem,
             COUNT(id) AS totalCompeticoes
-        FROM fairplay_tcc.historico_atletas
+        FROM historico_atletas
         WHERE LOWER(nome_atleta) LIKE LOWER(CONCAT('%', :termo, '%'))
         GROUP BY nome_atleta
         ORDER BY COUNT(id) DESC
@@ -57,16 +59,10 @@ public interface HistoricoAtletaRepository extends JpaRepository<HistoricoAtleta
     @Modifying
     @Transactional
     @Query(value = """
-        INSERT IGNORE INTO fairplay_tcc.atletas_historico_vinculos (atleta_id, historico_id)
+        INSERT IGNORE INTO atletas_historico_vinculos (atleta_id, historico_id)
         SELECT :atletaId, h.id
-        FROM fairplay_tcc.historico_atletas h
+        FROM historico_atletas h
         WHERE LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(:nomeAtleta))
     """, nativeQuery = true)
     int vincularHistoricoAoAtleta(@Param("atletaId") Long atletaId, @Param("nomeAtleta") String nomeAtleta);
-
-    /** Remove os vínculos do atleta (usado antes de excluir o usuário). */
-    @Modifying
-    @Transactional
-    @Query(value = "DELETE FROM fairplay_tcc.atletas_historico_vinculos WHERE atleta_id = :atletaId", nativeQuery = true)
-    int desvincularPorAtletaId(@Param("atletaId") Long atletaId);
 }

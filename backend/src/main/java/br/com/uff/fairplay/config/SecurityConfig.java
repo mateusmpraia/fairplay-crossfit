@@ -53,7 +53,6 @@ public class SecurityConfig {
                 .requestMatchers("/api/sessao/**").authenticated()
                 .requestMatchers("/api/admin/**").hasRole("MASTER_ADMIN")
                 .requestMatchers("/api/eventos/**").hasRole("ORGANIZADOR")
-                .requestMatchers(HttpMethod.POST, "/api/atletas/*/resultados").hasRole("MASTER_ADMIN")
                 .requestMatchers("/api/atletas/**").hasRole("ATLETA")
                 .anyRequest().denyAll());
 

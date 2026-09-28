@@ -78,6 +78,19 @@ crie um novo arquivo `.sql` e inclua-o em `db.changelog-master.yaml` — nunca a
 
 O histórico de competições (`historico_atletas`) é importado pelos scripts Python da pasta `Testes`, fora deste repositório.
 
+| Tabela | Conteúdo |
+|---|---|
+| `atletas` | Contas de atletas e organizadores, e atletas pendentes do histórico (perfil `HISTORICO`) |
+| `historico_atletas` | Resultados de competições importados |
+| `atletas_historico_vinculos` | Quais registros do histórico pertencem a cada atleta |
+| `eventos`, `categorias_evento` | Eventos criados pelos organizadores e suas categorias |
+| `inscricoes_evento` | Inscrições, resultado da auditoria e colocação final |
+| `sessoes` | Logins ativos (tokens) |
+| `tokens_redefinicao_senha` | Links de recuperação de senha (recurso ainda desativado na interface) |
+
+Todas usam `utf8mb4`. Ao excluir uma conta, o banco apaga em cascata as sessões, inscrições, vínculos e,
+no caso de organizador, os eventos dele.
+
 ## Regras de categoria
 
 A escada de promoção é **Iniciante → Scale → Intermediário → RX → Elite**. Master é uma categoria à parte.
@@ -90,8 +103,8 @@ A escada de promoção é **Iniciante → Scale → Intermediário → RX → El
 - **Recomendação do painel do atleta:** usa as mesmas regras sobre todo o histórico dele.
 - **Gênero:** masculino não entra em categoria feminina e vice-versa; categorias mistas aceitam todos;
   atletas com gênero "Outro" podem ser inscritos em categorias masculinas, femininas ou mistas.
-- **Histórico considerado:** resultados de eventos do próprio FairPlay (colocações lançadas pelo organizador),
-  lançamentos manuais e o histórico importado.
+- **Histórico considerado:** resultados de eventos do próprio FairPlay (colocações lançadas pelo organizador)
+  e o histórico importado.
 
 As regras estão em `backend/.../service/RegrasElegibilidade.java`, cobertas por testes unitários.
 

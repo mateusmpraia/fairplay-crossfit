@@ -23,11 +23,12 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
      * é o registro que vira a conta da pessoa quando ela se cadastra e vincula esse histórico.
      */
     @Query(value = """
-        SELECT a.* FROM fairplay_tcc.atletas a
+        SELECT a.* FROM atletas a
         WHERE a.perfil = 'HISTORICO'
           AND EXISTS (
-              SELECT 1 FROM fairplay_tcc.historico_atletas h
-              WHERE h.atleta_id = a.id AND LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(:nome))
+              SELECT 1 FROM atletas_historico_vinculos v
+              JOIN historico_atletas h ON h.id = v.historico_id
+              WHERE v.atleta_id = a.id AND LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(:nome))
           )
         LIMIT 1
     """, nativeQuery = true)
@@ -35,7 +36,7 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
 
     /** Atletas (perfil ATLETA) cujo CPF, sem pontuação, está na lista informada (só dígitos). */
     @Query(value = """
-        SELECT * FROM fairplay_tcc.atletas a
+        SELECT * FROM atletas a
         WHERE a.perfil = 'ATLETA'
           AND REPLACE(REPLACE(a.cpf, '.', ''), '-', '') IN (:cpfsDigitos)
     """, nativeQuery = true)
@@ -61,8 +62,8 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
             a.estado AS estado,
             a.nome_box AS nomeBox,
             a.perfil AS perfil,
-            (SELECT COUNT(h.id) FROM fairplay_tcc.historico_atletas h WHERE LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(a.nome_completo))) AS totalHistoricos
-        FROM fairplay_tcc.atletas a
+            (SELECT COUNT(h.id) FROM historico_atletas h WHERE LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(a.nome_completo))) AS totalHistoricos
+        FROM atletas a
         WHERE a.perfil <> 'ORGANIZADOR'
           AND (:termo IS NULL OR :termo = ''
            OR LOWER(a.nome_completo) LIKE LOWER(CONCAT('%', :termo, '%'))
@@ -81,13 +82,13 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
             GROUP_CONCAT(DISTINCT COALESCE(h.box_origem, 'Sem Box') SEPARATOR ' / ') AS nomeBox,
             'HISTORICO' AS perfil,
             COUNT(h.id) AS totalHistoricos
-        FROM fairplay_tcc.historico_atletas h
-        WHERE h.atleta_id IS NULL
+        FROM historico_atletas h
+        WHERE NOT EXISTS (SELECT 1 FROM atletas_historico_vinculos v WHERE v.historico_id = h.id)
           AND (:termo IS NULL OR :termo = ''
            OR LOWER(h.nome_atleta) LIKE LOWER(CONCAT('%', :termo, '%'))
            OR LOWER(h.box_origem) LIKE LOWER(CONCAT('%', :termo, '%')))
           AND NOT EXISTS (
-              SELECT 1 FROM fairplay_tcc.atletas a2
+              SELECT 1 FROM atletas a2
               WHERE LOWER(TRIM(a2.nome_completo)) = LOWER(TRIM(h.nome_atleta))
           )
         GROUP BY LOWER(h.nome_atleta)
