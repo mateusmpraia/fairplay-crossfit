@@ -7,3 +7,7 @@ databaseChangeLog:
       file: db/changelog/002-resultados-senhas-historico.sql
   - include:
       file: db/changelog/003-limpeza-e-organizacao.sql
+  - include:
+      file: db/changelog/004-vinculos-por-competicao.sql
+  - include:
+      file: db/changelog/005-reauditoria-automatica.sql

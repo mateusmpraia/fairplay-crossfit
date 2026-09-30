@@ -24,11 +24,13 @@ export default () => executarTeste('resultados-e-conta', async (t) => {
     nome, dataInicio: data, regraCampeaoSobe: true, regraTresPodiosSobe: true, regraTresParticipacoesSobe: false, categorias,
   }, org.token).then((r) => r.data);
 
-  // Evento antigo (Scale) e evento novo (Scale feminino + Masculino RX) para testar resultados e auditoria
+  // Evento antigo (Scale) e evento novo (Scale e Intermediário femininos + Masculino RX) para testar resultados e
+  // auditoria; o Intermediário existe para que a campeã do Scale tenha para onde subir
   const antigo = await criarEvento('E2E Evento Antigo', '2026-01-10', [{ formato: 'Individual', genero: 'Feminino', nivel: 'Scale' }]);
   const novo = await criarEvento('E2E Evento Novo', '2026-12-10', [
     { formato: 'Individual', genero: 'Feminino', nivel: 'Scale' },
     { formato: 'Individual', genero: 'Masculino', nivel: 'RX' },
+    { formato: 'Individual', genero: 'Feminino', nivel: 'Intermediário' },
   ]);
   const catAntiga = antigo.categorias[0].id;
   const catMasculina = novo.categorias.find((c) => c.genero === 'Masculino').id;

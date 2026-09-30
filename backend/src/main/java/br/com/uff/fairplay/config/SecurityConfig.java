@@ -49,7 +49,7 @@ public class SecurityConfig {
                 // Página de erro do Spring: sem isso, qualquer erro (400, 500...) viraria 401
                 .requestMatchers("/error").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/atletas/login", "/api/atletas/cadastro", "/api/admin/usuarios/login").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/atletas/historico/sugestoes").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/atletas/historico/sugestoes", "/api/atletas/historico/competicoes").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/conta/recuperar-senha", "/api/conta/redefinir-senha").permitAll()
                 .requestMatchers("/api/conta/**").hasAnyRole("ATLETA", "ORGANIZADOR")
                 .requestMatchers("/api/sessao/**").authenticated()

@@ -4,7 +4,10 @@ import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.CategoriaCompeticao;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Regras de categoria do FairPlay, num só lugar, usadas pela auditoria das inscrições e pela
@@ -34,29 +37,48 @@ public final class RegrasElegibilidade {
      * @throws RegraNegocioException se um atleta masculino for para categoria feminina ou vice-versa
      */
     public static void validarGenero(String generoAtleta, String generoCategoria) {
-        String categoria = generoCategoria != null ? generoCategoria.trim().toUpperCase() : "";
-        String atleta = generoAtleta != null ? generoAtleta.trim().toUpperCase() : "";
-
-        boolean atletaMasculino = atleta.startsWith("M");
-        boolean atletaFeminino = atleta.startsWith("F");
-
-        if (categoria.contains("MIST") || (!atletaMasculino && !atletaFeminino)) {
+        if (generoCompativel(generoAtleta, generoCategoria)) {
             return;
         }
-        if (categoria.contains("MASC") && atletaFeminino) {
-            throw new RegraNegocioException("Atletas do sexo feminino não podem ser inscritos em categorias masculinas.");
+        throw new RegraNegocioException(ehFeminino(generoAtleta)
+                ? "Atletas do sexo feminino não podem ser inscritos em categorias masculinas."
+                : "Atletas do sexo masculino não podem ser inscritos em categorias femininas.");
+    }
+
+    /** Se o atleta pode competir numa categoria com este gênero (mesmas regras de {@link #validarGenero}). */
+    public static boolean generoCompativel(String generoAtleta, String generoCategoria) {
+        String categoria = generoCategoria != null ? generoCategoria.trim().toUpperCase() : "";
+        if (categoria.contains("MIST")) {
+            return true;
         }
-        if (categoria.contains("FEM") && atletaMasculino) {
-            throw new RegraNegocioException("Atletas do sexo masculino não podem ser inscritos em categorias femininas.");
+        if (categoria.contains("MASC")) {
+            return !ehFeminino(generoAtleta);
         }
+        if (categoria.contains("FEM")) {
+            return !ehMasculino(generoAtleta);
+        }
+        return true;
+    }
+
+    private static boolean ehMasculino(String genero) {
+        return genero != null && genero.trim().toUpperCase().startsWith("M");
+    }
+
+    private static boolean ehFeminino(String genero) {
+        return genero != null && genero.trim().toUpperCase().startsWith("F");
     }
 
     /**
-     * Audita a inscrição numa categoria. Cada critério ligado que o atleta viola vira uma infração e a
-     * inscrição fica IRREGULAR, com a recomendação da categoria seguinte. Em categorias sem nível acima
-     * (Elite e Master) os critérios de promoção não se aplicam.
+     * Audita a inscrição numa categoria. Cada critério ligado que o atleta viola vira uma infração. A inscrição
+     * só fica IRREGULAR se o evento oferecer ao atleta alguma categoria acima da inscrita (a recomendação é a
+     * menor delas): não faz sentido obrigar a subir para uma categoria que o evento não tem. Em categorias sem
+     * nível acima (Elite e Master) os critérios de promoção não se aplicam.
+     *
+     * @param niveisDisponiveis níveis das categorias do evento em que o atleta pode competir
+     *                          (mesmo formato da categoria inscrita e gênero compatível)
      */
-    public static ResultadoAuditoria auditar(CategoriaCompeticao nivel, CriteriosEvento criterios, List<Participacao> participacoes) {
+    public static ResultadoAuditoria auditar(CategoriaCompeticao nivel, CriteriosEvento criterios, List<Participacao> participacoes,
+                                             Set<CategoriaCompeticao> niveisDisponiveis) {
         if (!nivel.temProxima()) {
             return new ResultadoAuditoria(REGULAR, nivel.getDescricao(),
                     "Categoria " + nivel.getDescricao() + " não tem nível acima: os critérios de promoção não se aplicam.");
@@ -91,7 +113,16 @@ public final class RegrasElegibilidade {
         if (infracoes.isEmpty()) {
             return new ResultadoAuditoria(REGULAR, nivel.getDescricao(), "Atleta cumpre todos os critérios definidos.");
         }
-        return new ResultadoAuditoria(IRREGULAR, nivel.getProxima().getDescricao(), String.join(" | ", infracoes));
+
+        Optional<CategoriaCompeticao> destino = niveisDisponiveis.stream()
+                .filter(n -> n != nivel && n.igualOuAcimaDe(nivel))
+                .min(Comparator.comparingInt(CategoriaCompeticao::getNivel));
+        if (destino.isEmpty()) {
+            return new ResultadoAuditoria(REGULAR, nivel.getDescricao(),
+                    String.join(" | ", infracoes) + " Mas o evento não tem categoria acima de " + nivel.getDescricao()
+                            + " para este atleta, então ele pode competir nela.");
+        }
+        return new ResultadoAuditoria(IRREGULAR, destino.get().getDescricao(), String.join(" | ", infracoes));
     }
 
     /** Ordem em que as categorias são avaliadas para promoção (da mais alta para a mais baixa). */

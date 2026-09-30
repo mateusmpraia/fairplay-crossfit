@@ -1,5 +1,6 @@
 package br.com.uff.fairplay.controller;
 
+import br.com.uff.fairplay.dto.AlteracaoAuditoriaDTO;
 import br.com.uff.fairplay.dto.AtletaBuscaDTO;
 import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
@@ -103,6 +104,19 @@ public class EventoController {
     public ResponseEntity<List<InscricaoEvento>> listarInscricoesPorCategoria(@PathVariable Long categoriaId,
                                                                               @AuthenticationPrincipal UsuarioLogado organizador) {
         return ResponseEntity.ok(eventoService.listarInscricoes(categoriaId, organizador.id()));
+    }
+
+    /** Inscrições cuja auditoria mudou sozinha (histórico do atleta mudou) e o organizador ainda não viu, por categoria. */
+    @GetMapping("/alteracoes-auditoria")
+    public ResponseEntity<List<AlteracaoAuditoriaDTO>> alteracoesDeAuditoria(@AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.alteracoesDeAuditoria(organizador.id()));
+    }
+
+    /** O organizador viu a mudança de status da inscrição: ela deixa de aparecer em destaque. */
+    @PostMapping("/inscricoes/{inscricaoId}/ciente")
+    public ResponseEntity<InscricaoEvento> marcarCiente(@PathVariable Long inscricaoId,
+                                                        @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.ok(eventoService.marcarCiente(inscricaoId, organizador.id()));
     }
 
     @DeleteMapping("/inscricoes/{inscricaoId}")

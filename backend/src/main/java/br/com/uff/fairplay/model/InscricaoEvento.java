@@ -44,6 +44,17 @@ public class InscricaoEvento {
     @Column(name = "colocacao")
     private Integer colocacao;
 
+    /**
+     * Status que a inscrição tinha antes de a auditoria mudar sozinha, porque o histórico do atleta mudou
+     * depois da inscrição (nulo se não houve mudança ou se o organizador já marcou "ciente").
+     */
+    @Column(name = "status_anterior", length = 20)
+    private String statusAnterior;
+
+    /** Quando a auditoria mudou sozinha de status; enquanto preenchido, a inscrição aparece em destaque ao organizador. */
+    @Column(name = "auditoria_alterada_em")
+    private LocalDateTime auditoriaAlteradaEm;
+
     @PrePersist
     protected void onCreate() {
         if (this.dataInscricao == null) {

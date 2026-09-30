@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import api, { mensagemDeErro } from '../api';
+import Modal from '../components/Modal';
+import ListaSugestoes from '../components/ListaSugestoes';
+import SeletorCompeticoes from '../components/SeletorCompeticoes';
 import { mascaraCpf, mascaraCelular, mascaraData, dataBrParaIso, cpfValido, TAMANHO_MINIMO_SENHA } from '../utils/formatacao';
 import { corDoPerfil, imagemDoPerfil, estiloFeedback } from '../tema';
 
@@ -34,9 +37,19 @@ export default function CadastroAtleta() {
     nomeBox: ''
   });
 
-  // Perfis do histórico importado com nome parecido, que o atleta pode vincular à conta
-  const [sugestoesHistorico, setSugestoesHistorico] = useState([]);
-  const [perfilVinculado, setPerfilVinculado] = useState(null);
+  // Busca de nomes do histórico importado parecidos com o do atleta, que ele pode vincular à conta.
+  // status: 'ocioso' | 'buscando' | 'concluida' | 'erro'; "nome" é o nome a que as sugestões se referem.
+  const [busca, setBusca] = useState({ nome: '', sugestoes: [], status: 'ocioso' });
+  // Respostas do atleta, uma por nome do histórico: { nomeAtleta, boxOrigem, ids (marcadas), recusados (desmarcadas) }
+  const [respostasHistorico, setRespostasHistorico] = useState([]);
+  // Nome para o qual o atleta respondeu "Não sou eu" (volta a sugerir se ele mudar o nome)
+  const [nomeDispensado, setNomeDispensado] = useState(null);
+  const [perguntarHistorico, setPerguntarHistorico] = useState(false);
+  // Nome do histórico cujas competições o atleta está conferindo, e de onde ele veio (formulário ou envio)
+  const [nomeEmAnalise, setNomeEmAnalise] = useState(null);
+  const [analiseAoEnviar, setAnaliseAoEnviar] = useState(false);
+  const ultimoNomePesquisado = useRef('');
+  const idBuscaAtual = useRef(0);
 
   const [erro, setErro] = useState('');
   const [carregando, setCarregando] = useState(false);
@@ -44,41 +57,80 @@ export default function CadastroAtleta() {
   const isAtleta = tipoUsuario === 'ATLETA';
   const accentColor = corDoPerfil(tipoUsuario);
 
-  const nomeParaBusca = formData.nomeCompleto.trim();
-  const buscarHistorico = isAtleta && !perfilVinculado && nomeParaBusca.length >= 3;
-  const mostrarSugestoes = buscarHistorico && sugestoesHistorico.length > 0;
+  const nomeParaBusca = formData.nomeCompleto.trim().replace(/\s+/g, ' ');
+  const buscarHistorico = isAtleta && nomeParaBusca.length >= 3;
+  const historicoDispensado = nomeDispensado !== null && nomeDispensado === nomeParaBusca;
+  const vinculosFeitos = respostasHistorico.filter((r) => r.ids.length > 0);
+  const sugestoesPendentes = busca.sugestoes.filter((s) => !respostasHistorico.some((r) => r.nomeAtleta === s.nomeAtleta));
+  const mostrarSugestoes = buscarHistorico && !historicoDispensado && sugestoesPendentes.length > 0;
+  const buscaPendente = busca.status === 'buscando' || busca.nome !== nomeParaBusca;
+
+  const pesquisarHistorico = useCallback(async (nome) => {
+    const id = ++idBuscaAtual.current;
+    ultimoNomePesquisado.current = nome;
+    // Mantém as sugestões anteriores na tela enquanto a nova busca não volta, para o cartão não piscar
+    setBusca((anterior) => ({ ...anterior, status: 'buscando' }));
+
+    try {
+      const { data } = await api.get('/atletas/historico/sugestoes', { params: { nome } });
+      const sugestoes = data || [];
+      if (id === idBuscaAtual.current) setBusca({ nome, sugestoes, status: 'concluida' });
+      return sugestoes;
+    } catch (err) {
+      console.error('Erro ao buscar histórico:', err);
+      if (id === idBuscaAtual.current) setBusca({ nome, sugestoes: [], status: 'erro' });
+      return [];
+    }
+  }, []);
 
   // Busca sugestões do histórico enquanto o atleta digita o nome (com atraso de 400 ms)
   useEffect(() => {
     if (!buscarHistorico) return;
 
-    const timer = setTimeout(async () => {
-      try {
-        const { data } = await api.get('/atletas/historico/sugestoes', { params: { nome: nomeParaBusca } });
-        setSugestoesHistorico(data || []);
-      } catch (err) {
-        console.error('Erro ao buscar histórico:', err);
-      }
+    const timer = setTimeout(() => {
+      if (ultimoNomePesquisado.current !== nomeParaBusca) pesquisarHistorico(nomeParaBusca);
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [buscarHistorico, nomeParaBusca]);
+  }, [buscarHistorico, nomeParaBusca, pesquisarHistorico]);
+
+  // Ao sair do campo de nome, busca na hora: é quando o atleta terminou de digitar e olha para a tela
+  const handleBlurNome = () => {
+    if (buscarHistorico && ultimoNomePesquisado.current !== nomeParaBusca) pesquisarHistorico(nomeParaBusca);
+  };
 
   const trocarPerfil = (perfil) => {
     setTipoUsuario(perfil);
     setErro('');
-    setPerfilVinculado(null);
+    setRespostasHistorico([]);
   };
 
-  const handleSelecionarHistorico = (item) => {
-    setPerfilVinculado(item);
-    setSugestoesHistorico([]);
+  const analisarNome = (item, aoEnviar) => {
+    setNomeEmAnalise(item);
+    setAnaliseAoEnviar(aoEnviar);
+  };
 
-    // O histórico pode ter vários boxes ("Box A / Box B"): usa o primeiro para preencher o campo
-    const boxPrincipal = (item.boxOrigem || '').split(' / ')[0].trim();
-    if (boxPrincipal && boxPrincipal !== 'N/D') {
-      setFormData((prev) => ({ ...prev, nomeBox: boxPrincipal }));
+  /** O atleta conferiu as competições de um nome: guarda a resposta e, se veio do envio, conclui o cadastro. */
+  const confirmarCompeticoes = ({ ids, recusados }) => {
+    const resposta = { nomeAtleta: nomeEmAnalise.nomeAtleta, boxOrigem: nomeEmAnalise.boxOrigem, ids, recusados };
+    const respostas = [...respostasHistorico, resposta];
+    setRespostasHistorico(respostas);
+    setNomeEmAnalise(null);
+
+    // O histórico pode ter vários boxes ("Box A / Box B"): usa o primeiro se o atleta ainda não informou o box
+    const boxPrincipal = (resposta.boxOrigem || '').split(' / ')[0].trim();
+    if (ids.length > 0 && boxPrincipal && boxPrincipal !== 'N/D') {
+      setFormData((prev) => (prev.nomeBox.trim() ? prev : { ...prev, nomeBox: boxPrincipal }));
     }
+
+    if (analiseAoEnviar) {
+      setPerguntarHistorico(false);
+      enviarCadastro(respostas);
+    }
+  };
+
+  const desfazerResposta = (nomeAtleta) => {
+    setRespostasHistorico((prev) => prev.filter((r) => r.nomeAtleta !== nomeAtleta));
   };
 
   const handleChange = (e) => {
@@ -87,39 +139,57 @@ export default function CadastroAtleta() {
     setFormData({ ...formData, [name]: mascara ? mascara(value) : value });
   };
 
+  const validarFormulario = () => {
+    if (!cpfValido(formData.cpf)) return 'CPF inválido. Confira os números digitados.';
+    if (formData.senha.length < TAMANHO_MINIMO_SENHA) return `A senha deve ter pelo menos ${TAMANHO_MINIMO_SENHA} caracteres.`;
+    if (formData.senha !== formData.confirmarSenha) return 'A confirmação de senha não confere.';
+    if (!dataBrParaIso(formData.dataNascimento)) return 'Informe uma data de nascimento válida no formato DD/MM/AAAA.';
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErro('');
 
-    if (!cpfValido(formData.cpf)) {
-      setErro('CPF inválido. Confira os números digitados.');
+    const erroValidacao = validarFormulario();
+    if (erroValidacao) {
+      setErro(erroValidacao);
       return;
     }
 
-    if (formData.senha.length < TAMANHO_MINIMO_SENHA) {
-      setErro(`A senha deve ter pelo menos ${TAMANHO_MINIMO_SENHA} caracteres.`);
-      return;
+    // Antes de cadastrar, garante que o atleta viu (e respondeu) as competições encontradas no nome dele
+    if (buscarHistorico && respostasHistorico.length === 0 && !historicoDispensado) {
+      setCarregando(true);
+      const sugestoes = busca.status === 'concluida' && busca.nome === nomeParaBusca
+        ? busca.sugestoes
+        : await pesquisarHistorico(nomeParaBusca);
+      setCarregando(false);
+
+      if (sugestoes.length > 0) {
+        setPerguntarHistorico(true);
+        return;
+      }
     }
 
-    if (formData.senha !== formData.confirmarSenha) {
-      setErro('A confirmação de senha não confere.');
-      return;
-    }
+    enviarCadastro(respostasHistorico);
+  };
 
-    const dataIso = dataBrParaIso(formData.dataNascimento);
-    if (!dataIso) {
-      setErro('Informe uma data de nascimento válida no formato DD/MM/AAAA.');
-      return;
-    }
+  const recusarVinculoAoEnviar = () => {
+    setPerguntarHistorico(false);
+    setNomeDispensado(nomeParaBusca);
+    enviarCadastro(respostasHistorico);
+  };
 
+  const enviarCadastro = async (respostas) => {
     setCarregando(true);
 
     try {
       await api.post('/atletas/cadastro', {
         ...formData,
-        dataNascimento: dataIso,
+        dataNascimento: dataBrParaIso(formData.dataNascimento),
         perfil: tipoUsuario,
-        historicoNomeAtleta: perfilVinculado?.nomeAtleta ?? null,
+        historicoIds: isAtleta ? respostas.flatMap((r) => r.ids) : [],
+        historicoRecusadosIds: isAtleta ? respostas.flatMap((r) => r.recusados) : [],
       });
 
       const perfilDescricao = isAtleta ? 'Atleta' : 'Organizador';
@@ -191,58 +261,65 @@ export default function CadastroAtleta() {
 
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Nome Completo</label>
+              {/* O Chrome ignora autocomplete="off" em campos que ele reconhece como nome, procurando a palavra
+                  "nome" no rótulo, no placeholder e no atributo name. A lista de preenchimento dele cobriria as
+                  sugestões do histórico, então nenhum dos três contém a palavra: o rótulo tem um caractere
+                  invisível (U+200B) entre "No" e "me" e o campo usa name="identificacao". */}
+              <label style={styles.label}>{'No\u200Bme Completo'}</label>
               <input
                 type="text"
-                name="nomeCompleto"
-                placeholder="Seu nome completo"
+                name="identificacao"
+                placeholder="Ex.: Ana Paula Souza"
                 value={formData.nomeCompleto}
-                onChange={handleChange}
+                onChange={(e) => setFormData({ ...formData, nomeCompleto: e.target.value })}
+                onBlur={handleBlurNome}
+                autoComplete="off"
                 required
                 style={styles.input}
               />
+              {isAtleta && vinculosFeitos.length === 0 && (
+                <span style={styles.dicaNome}>
+                  {!buscarHistorico
+                    ? 'Já competiu antes? Digite seu nome como aparecia nas inscrições para trazer seus resultados.'
+                    : buscaPendente
+                      ? 'Procurando competições anteriores com esse nome…'
+                      : busca.status === 'erro'
+                        ? 'Não foi possível procurar competições anteriores agora.'
+                        : busca.status === 'concluida' && busca.sugestoes.length === 0
+                          ? 'Nenhuma competição anterior encontrada com esse nome.'
+                          : ''}
+                </span>
+              )}
             </div>
 
             {mostrarSugestoes && (
               <div style={styles.sugestoesCard}>
                 <div style={styles.sugestoesHeader}>
-                  <span>🔍 Encontramos competições anteriores no seu nome:</span>
+                  <span>
+                    🔍 Encontramos competições anteriores{vinculosFeitos.length > 0 ? ' com nomes parecidos. Usou outra forma do nome?' : ' no seu nome:'}
+                  </span>
+                  <button type="button" onClick={() => setNomeDispensado(nomeParaBusca)} style={styles.btnNaoSouEu}>
+                    {vinculosFeitos.length > 0 ? 'Ocultar' : 'Não sou eu'}
+                  </button>
                 </div>
-                {sugestoesHistorico.map((item) => (
-                  <div key={item.nomeAtleta} style={styles.sugestaoItem}>
-                    <div>
-                      <div style={styles.sugestaoNome}>{item.nomeAtleta}</div>
-                      <div style={styles.sugestaoDetalhe}>
-                        Box: <strong>{item.boxOrigem || 'N/D'}</strong> • {item.totalCompeticoes} resultado(s)
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSelecionarHistorico(item)}
-                      style={styles.btnVincular}
-                    >
-                      É você? Vincular
-                    </button>
-                  </div>
-                ))}
+                <ListaSugestoes sugestoes={sugestoesPendentes} onEscolher={(item) => analisarNome(item, false)} />
               </div>
             )}
 
-            {perfilVinculado && (
+            {vinculosFeitos.length > 0 && (
               <div style={styles.vinculoAtivoCard}>
-                <div>
-                  <span style={{ color: '#00ff88', fontWeight: 'bold' }}>✓ Histórico Vinculado:</span>
-                  <div style={styles.vinculoAtivoTexto}>
-                    {perfilVinculado.nomeAtleta} ({perfilVinculado.boxOrigem})
+                <span style={{ color: '#00ff88', fontWeight: 'bold', fontSize: '0.85rem' }}>✓ Histórico vinculado</span>
+                {vinculosFeitos.map((r) => (
+                  <div key={r.nomeAtleta} style={styles.vinculoAtivoLinha}>
+                    <span style={styles.vinculoAtivoTexto}>
+                      <strong>{r.nomeAtleta}</strong> • {r.ids.length} competição(ões)
+                    </span>
+                    <button type="button" onClick={() => desfazerResposta(r.nomeAtleta)} style={styles.btnDesfazer}>
+                      Desfazer
+                    </button>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPerfilVinculado(null)}
-                  style={styles.btnDesfazer}
-                >
-                  Desfazer
-                </button>
+                ))}
+                <span style={styles.dicaNome}>Competiu com outro nome? Você também pode vincular depois, pelo seu painel.</span>
               </div>
             )}
 
@@ -266,6 +343,7 @@ export default function CadastroAtleta() {
                 <input
                   type="text"
                   name="celular"
+                  autoComplete="tel-national"
                   placeholder="(21) 99999-9999"
                   value={formData.celular}
                   onChange={handleChange}
@@ -314,6 +392,7 @@ export default function CadastroAtleta() {
                 <input
                   type="text"
                   name="cidade"
+                  autoComplete="address-level2"
                   placeholder="Ex: Niterói"
                   value={formData.cidade}
                   onChange={handleChange}
@@ -355,6 +434,7 @@ export default function CadastroAtleta() {
               <input
                 type="email"
                 name="email"
+                autoComplete="email"
                 placeholder="seu@email.com"
                 value={formData.email}
                 onChange={handleChange}
@@ -369,6 +449,7 @@ export default function CadastroAtleta() {
                 <input
                   type="password"
                   name="senha"
+                  autoComplete="new-password"
                   placeholder="••••••••"
                   value={formData.senha}
                   onChange={handleChange}
@@ -382,6 +463,7 @@ export default function CadastroAtleta() {
                 <input
                   type="password"
                   name="confirmarSenha"
+                  autoComplete="new-password"
                   placeholder="••••••••"
                   value={formData.confirmarSenha}
                   onChange={handleChange}
@@ -413,6 +495,30 @@ export default function CadastroAtleta() {
           </form>
         </div>
       </div>
+
+      {nomeEmAnalise ? (
+        <Modal titulo="Quais competições são suas?" corTitulo="#00ff88" largura={560} onFechar={() => setNomeEmAnalise(null)}>
+          <SeletorCompeticoes
+            nome={nomeEmAnalise.nomeAtleta}
+            onConfirmar={confirmarCompeticoes}
+            onVoltar={() => setNomeEmAnalise(null)}
+            processando={carregando}
+          />
+        </Modal>
+      ) : perguntarHistorico && (
+        <Modal titulo="Você já competiu antes?" corTitulo="#00ff88" largura={480} onFechar={() => setPerguntarHistorico(false)}>
+          <p style={styles.textoModal}>
+            Encontramos competições anteriores com um nome parecido com <strong>{nomeParaBusca}</strong>.
+            Se alguma for sua, vincule para trazer seus resultados para a conta.
+          </p>
+          <ListaSugestoes sugestoes={sugestoesPendentes} onEscolher={(item) => analisarNome(item, true)} textoBotao="Sou eu, ver competições" />
+          <div className="modal-acoes">
+            <button type="button" className="botao botao-secundario" onClick={recusarVinculoAoEnviar}>
+              Não sou eu, continuar cadastro
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -523,46 +629,49 @@ const styles = {
     gap: '10px',
   },
   sugestoesHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '10px',
     fontSize: '0.78rem',
     color: '#8b949e',
     fontWeight: '600',
   },
-  sugestaoItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#0d1117',
-    padding: '8px 12px',
-    borderRadius: '6px',
-    border: '1px solid #21262d',
-  },
-  sugestaoNome: {
-    color: '#f0f6fc',
-    fontSize: '0.88rem',
-    fontWeight: 'bold',
-  },
-  sugestaoDetalhe: {
+  btnNaoSouEu: {
+    backgroundColor: 'transparent',
     color: '#8b949e',
-    fontSize: '0.78rem',
-  },
-  btnVincular: {
-    backgroundColor: '#238636',
-    color: '#ffffff',
-    border: 'none',
+    border: '1px solid #30363d',
     borderRadius: '6px',
-    padding: '6px 12px',
-    fontSize: '0.75rem',
-    fontWeight: 'bold',
+    padding: '4px 10px',
+    fontSize: '0.72rem',
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  dicaNome: {
+    fontSize: '0.75rem',
+    color: '#718096',
+    minHeight: '1em',
+  },
+  textoModal: {
+    color: '#cbd5e0',
+    fontSize: '0.9rem',
+    lineHeight: '1.5',
+    marginTop: 0,
   },
   vinculoAtivoCard: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
+    gap: '8px',
     backgroundColor: 'rgba(0, 255, 136, 0.08)',
     border: '1px solid #00ff88',
     borderRadius: '8px',
     padding: '10px 14px',
+  },
+  vinculoAtivoLinha: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '10px',
   },
   vinculoAtivoTexto: {
     color: '#c9d1d9',

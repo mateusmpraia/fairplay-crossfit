@@ -14,8 +14,8 @@ import java.time.LocalDate;
  *   <li>ATLETA e ORGANIZADOR: contas com login. A mesma pessoa pode ter uma conta de cada perfil,
  *       por isso as restrições de unicidade incluem o perfil;</li>
  *   <li>HISTORICO: atleta pendente, criado ao inscrever alguém que só existe no histórico importado.
- *       Tem só nome, gênero e box; quando a pessoa se cadastra e vincula esse histórico, o registro
- *       vira a conta dela (ver {@code AtletaController#cadastrarAtleta}).</li>
+ *       Tem só nome, gênero e box; quando a pessoa vincula esse histórico (no cadastro ou no painel), o
+ *       pendente é incorporado à conta dela (ver {@code VinculoHistoricoService#vincular}).</li>
  * </ul>
  * O esquema da tabela é definido pelas migrações do Liquibase.
  */

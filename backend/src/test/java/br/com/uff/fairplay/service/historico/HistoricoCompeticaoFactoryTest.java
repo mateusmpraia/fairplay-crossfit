@@ -47,7 +47,7 @@ class HistoricoCompeticaoFactoryTest {
                 new ResultadoEventoDTO(100L, 20L, "Evento auditado", LocalDate.of(2026, 10, 1), CategoriaCompeticao.RX, 3),
                 new ResultadoEventoDTO(101L, 10L, "Evento anterior", LocalDate.of(2026, 2, 1), CategoriaCompeticao.SCALE, 1)));
         when(historicos.buscarHistoricoPorAtletaId(1L)).thenReturn(List.of(historico(5L, "Elite", 1)));
-        when(historicos.buscarHistoricoPorAtletaIdOuNome(1L, "Ana Faggian"))
+        when(historicos.buscarHistoricoParaAuditoria(1L, "Ana Faggian"))
                 .thenReturn(List.of(historico(5L, "Elite", 1), historico(6L, "Outros", 2)));
 
         // Mesma ordem que o Spring monta pela anotação @Order das fontes
@@ -62,7 +62,7 @@ class HistoricoCompeticaoFactoryTest {
         assertThat(historico.registros()).extracting(RegistroCompeticao::id).containsExactly(100L, 101L, 5L);
         assertThat(historico.registros()).extracting(RegistroCompeticao::origem)
                 .containsExactly(Origem.EVENTO, Origem.EVENTO, Origem.HISTORICO);
-        verify(historicos, never()).buscarHistoricoPorAtletaIdOuNome(any(), any());
+        verify(historicos, never()).buscarHistoricoParaAuditoria(any(), any());
     }
 
     @Test

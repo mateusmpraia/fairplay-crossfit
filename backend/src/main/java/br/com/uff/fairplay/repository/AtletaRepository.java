@@ -18,22 +18,6 @@ public interface AtletaRepository extends JpaRepository<Atleta, Long> {
     Optional<Atleta> findByEmailIgnoreCaseAndPerfil(String email, String perfil);
     Optional<Atleta> findByCpfAndPerfil(String cpf, String perfil);
 
-    /**
-     * Atleta pendente (perfil HISTORICO) já criado para os registros do histórico com este nome —
-     * é o registro que vira a conta da pessoa quando ela se cadastra e vincula esse histórico.
-     */
-    @Query(value = """
-        SELECT a.* FROM atletas a
-        WHERE a.perfil = 'HISTORICO'
-          AND EXISTS (
-              SELECT 1 FROM atletas_historico_vinculos v
-              JOIN historico_atletas h ON h.id = v.historico_id
-              WHERE v.atleta_id = a.id AND LOWER(TRIM(h.nome_atleta)) = LOWER(TRIM(:nome))
-          )
-        LIMIT 1
-    """, nativeQuery = true)
-    Optional<Atleta> buscarPendenteDoHistorico(@Param("nome") String nome);
-
     /** Atletas (perfil ATLETA) cujo CPF, sem pontuação, está na lista informada (só dígitos). */
     @Query(value = """
         SELECT * FROM atletas a

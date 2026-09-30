@@ -1,5 +1,6 @@
 package br.com.uff.fairplay.service;
 
+import br.com.uff.fairplay.dto.AlteracaoAuditoriaDTO;
 import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
@@ -11,15 +12,14 @@ import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
 import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.*;
 import br.com.uff.fairplay.repository.*;
-import br.com.uff.fairplay.service.RegrasElegibilidade.CriteriosEvento;
-import br.com.uff.fairplay.service.RegrasElegibilidade.ResultadoAuditoria;
-import br.com.uff.fairplay.service.historico.HistoricoCompeticaoFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,20 +44,20 @@ public class EventoService {
     private final InscricaoEventoRepository inscricaoEventoRepository;
     private final AtletaRepository atletaRepository;
     private final HistoricoAtletaRepository historicoAtletaRepository;
-    private final HistoricoCompeticaoFactory historicoFactory;
+    private final AuditoriaInscricaoService auditoriaService;
 
     public EventoService(EventoRepository eventoRepository,
                          CategoriaEventoRepository categoriaEventoRepository,
                          InscricaoEventoRepository inscricaoEventoRepository,
                          AtletaRepository atletaRepository,
                          HistoricoAtletaRepository historicoAtletaRepository,
-                         HistoricoCompeticaoFactory historicoFactory) {
+                         AuditoriaInscricaoService auditoriaService) {
         this.eventoRepository = eventoRepository;
         this.categoriaEventoRepository = categoriaEventoRepository;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.atletaRepository = atletaRepository;
         this.historicoAtletaRepository = historicoAtletaRepository;
-        this.historicoFactory = historicoFactory;
+        this.auditoriaService = auditoriaService;
     }
 
     // ---------------------------------------------------------------- Eventos e categorias
@@ -98,9 +98,13 @@ public class EventoService {
         return eventoRepository.findByOrganizadorIdOrderByDataInicioDesc(organizadorId);
     }
 
+    /** Exclui o evento; os resultados lançados nele saem do histórico dos atletas, que são reauditados. */
     @Transactional
     public void excluirEvento(Long eventoId, Long organizadorId) {
-        eventoRepository.delete(buscarEventoDoOrganizador(eventoId, organizadorId));
+        Evento evento = buscarEventoDoOrganizador(eventoId, organizadorId);
+        List<Long> atletasComResultado = atletasComResultado(evento.getCategorias());
+        eventoRepository.delete(evento);
+        auditoriaService.reauditarInscricoesEmAberto(atletasComResultado);
     }
 
     /** Atualiza os critérios de promoção do evento e refaz a auditoria de todos os inscritos. */
@@ -111,20 +115,32 @@ public class EventoService {
         evento.setRegraTresPodiosSobe(regras.regraTresPodiosSobe());
         evento.setRegraTresParticipacoesSobe(regras.regraTresParticipacoesSobe());
         eventoRepository.save(evento);
-
-        for (CategoriaEvento categoria : evento.getCategorias()) {
-            for (InscricaoEvento inscricao : inscricaoEventoRepository.findByCategoriaEventoId(categoria.getId())) {
-                aplicarAuditoria(inscricao, auditarElegibilidade(inscricao.getAtleta(), categoria));
-                inscricaoEventoRepository.save(inscricao);
-            }
-        }
-
+        reauditarEvento(evento);
         return evento;
     }
 
+    /** Refaz a auditoria de todos os inscritos do evento, a pedido do organizador (critérios ou categorias mudaram). */
+    private void reauditarEvento(Evento evento) {
+        for (CategoriaEvento categoria : evento.getCategorias()) {
+            for (InscricaoEvento inscricao : inscricaoEventoRepository.findByCategoriaEventoId(categoria.getId())) {
+                auditoriaService.aplicar(inscricao);
+                inscricaoEventoRepository.save(inscricao);
+            }
+        }
+    }
+
+    /**
+     * Adiciona a categoria e refaz a auditoria do evento: com uma categoria acima, quem atingiu um critério
+     * de promoção passa a ser obrigado a subir.
+     */
     @Transactional
     public CategoriaEvento adicionarCategoria(Long eventoId, CriarCategoriaDTO dto, Long organizadorId) {
-        return categoriaEventoRepository.save(novaCategoria(buscarEventoDoOrganizador(eventoId, organizadorId), dto));
+        Evento evento = buscarEventoDoOrganizador(eventoId, organizadorId);
+        CategoriaEvento categoria = novaCategoria(evento, dto);
+        evento.getCategorias().add(categoria);
+        CategoriaEvento salva = categoriaEventoRepository.save(categoria);
+        reauditarEvento(evento);
+        return salva;
     }
 
     @Transactional
@@ -132,8 +148,19 @@ public class EventoService {
         CategoriaEvento categoria = buscarCategoriaDoOrganizador(categoriaId, organizadorId);
         // A categoria sai da lista do evento: como a lista é carregada junto com o evento e salva em cascata,
         // apagar só a categoria faria o Hibernate desfazer a exclusão ao gravar o evento
-        categoria.getEvento().getCategorias().remove(categoria);
+        List<Long> atletasComResultado = atletasComResultado(List.of(categoria));
+        Evento evento = categoria.getEvento();
+        evento.getCategorias().remove(categoria);
         categoriaEventoRepository.delete(categoria);
+        auditoriaService.reauditarInscricoesEmAberto(atletasComResultado);
+        // Sem a categoria, quem era obrigado a subir para ela pode passar a competir onde está
+        reauditarEvento(evento);
+    }
+
+    /** Atletas com colocação lançada nas categorias (o histórico deles muda se as categorias forem apagadas). */
+    private List<Long> atletasComResultado(List<CategoriaEvento> categorias) {
+        List<Long> ids = categorias.stream().map(CategoriaEvento::getId).toList();
+        return ids.isEmpty() ? List.of() : inscricaoEventoRepository.buscarAtletasComResultado(ids);
     }
 
     /** Busca o evento e garante que ele pertence ao organizador logado. */
@@ -244,11 +271,31 @@ public class EventoService {
                 .orElseThrow(() -> new RecursoNaoEncontradoException("Inscrição não encontrada."));
         exigirDono(inscricao.getCategoriaEvento().getEvento(), organizadorId);
         inscricaoEventoRepository.delete(inscricao);
+        // Se já tinha colocação, o resultado sai do histórico do atleta
+        if (inscricao.getColocacao() != null) {
+            auditoriaService.reauditarInscricoesEmAberto(inscricao.getAtleta().getId());
+        }
+    }
+
+    /** Quantas inscrições de cada categoria do organizador mudaram de status sozinhas e ele ainda não viu. */
+    public List<AlteracaoAuditoriaDTO> alteracoesDeAuditoria(Long organizadorId) {
+        return inscricaoEventoRepository.contarAlteracoesDoOrganizador(organizadorId);
+    }
+
+    /** O organizador marcou que viu a mudança de status da inscrição. */
+    @Transactional
+    public InscricaoEvento marcarCiente(Long inscricaoId, Long organizadorId) {
+        InscricaoEvento inscricao = inscricaoEventoRepository.findById(inscricaoId)
+                .orElseThrow(() -> new RecursoNaoEncontradoException("Inscrição não encontrada."));
+        exigirDono(inscricao.getCategoriaEvento().getEvento(), organizadorId);
+        auditoriaService.limparDestaque(inscricao);
+        return inscricaoEventoRepository.save(inscricao);
     }
 
     /**
      * Grava as colocações finais da categoria. Esses resultados passam a fazer parte do histórico
-     * do atleta (painel, recomendação e auditoria de eventos futuros).
+     * do atleta (painel, recomendação e auditoria de eventos futuros), então as inscrições em aberto
+     * de quem teve a colocação alterada são reauditadas.
      */
     @Transactional
     public List<InscricaoEvento> lancarResultados(Long categoriaId, LancarResultadosDTO dto, Long organizadorId) {
@@ -259,6 +306,7 @@ public class EventoService {
         if (dto.resultados() == null) {
             throw new RegraNegocioException("Nenhum resultado foi enviado.");
         }
+        Set<Long> atletasAlterados = new HashSet<>();
         for (LancarResultadosDTO.Item item : dto.resultados()) {
             InscricaoEvento inscricao = inscricoes.get(item.inscricaoId());
             if (inscricao == null) {
@@ -267,10 +315,15 @@ public class EventoService {
             if (item.colocacao() != null && item.colocacao() < 1) {
                 throw new RegraNegocioException("A colocação deve ser um número inteiro a partir de 1.");
             }
+            if (!Objects.equals(inscricao.getColocacao(), item.colocacao())) {
+                atletasAlterados.add(inscricao.getAtleta().getId());
+            }
             inscricao.setColocacao(item.colocacao());
         }
 
-        return inscricaoEventoRepository.saveAll(inscricoes.values());
+        List<InscricaoEvento> salvas = inscricaoEventoRepository.saveAll(inscricoes.values());
+        auditoriaService.reauditarInscricoesEmAberto(atletasAlterados);
+        return salvas;
     }
 
     private Atleta obterAtletaCadastrado(Long atletaId, CategoriaEvento categoria) {
@@ -324,26 +377,9 @@ public class EventoService {
         InscricaoEvento inscricao = new InscricaoEvento();
         inscricao.setCategoriaEvento(categoria);
         inscricao.setAtleta(atleta);
-        aplicarAuditoria(inscricao, auditarElegibilidade(atleta, categoria));
+        auditoriaService.aplicar(inscricao);
 
         return inscricaoEventoRepository.save(inscricao);
-    }
-
-    // ---------------------------------------------------------------- Auditoria de elegibilidade
-
-    private void aplicarAuditoria(InscricaoEvento inscricao, ResultadoAuditoria auditoria) {
-        inscricao.setStatusElegibilidade(auditoria.status());
-        inscricao.setCategoriaRecomendada(auditoria.categoriaRecomendada());
-        inscricao.setMotivoIrregularidade(auditoria.motivo());
-    }
-
-    private ResultadoAuditoria auditarElegibilidade(Atleta atleta, CategoriaEvento categoriaAlvo) {
-        Evento evento = categoriaAlvo.getEvento();
-        CriteriosEvento criterios = new CriteriosEvento(
-                evento.isRegraCampeaoSobe(), evento.isRegraTresPodiosSobe(), evento.isRegraTresParticipacoesSobe());
-        // O histórico chega pronto da factory (adapters de todas as origens), sem o próprio evento auditado
-        List<Participacao> participacoes = historicoFactory.paraAuditoria(atleta, evento).participacoes();
-        return RegrasElegibilidade.auditar(categoriaAlvo.getNivel(), criterios, participacoes);
     }
 
     private static String apenasDigitos(String valor) {

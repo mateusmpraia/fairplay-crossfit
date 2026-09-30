@@ -15,7 +15,7 @@ class ValidacaoCadastroTest {
     private static CadastroAtletaDTO cadastro(String cpf, String celular, String email, String estado, String senha,
                                               String genero, LocalDate nascimento) {
         return new CadastroAtletaDTO("  Ana Souza ", cpf, nascimento, genero, celular, email, senha,
-                "Niterói", estado, "Box Teste", "ATLETA", null);
+                "Niterói", estado, "Box Teste", "ATLETA", null, null);
     }
 
     private static CadastroAtletaDTO valido() {

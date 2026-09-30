@@ -16,11 +16,14 @@ export default () => executarTeste('fluxo-principal', async (t) => {
   // ---------------------------------------------------------------- Cadastro de atleta com vínculo de histórico
   await t.clicar('Cadastre-se aqui', 'a');
   await t.esperarTexto('Cadastro de Atleta');
-  await page.type('input[name=nomeCompleto]', 'Ana Faggian');
-  await t.esperarTexto('É você? Vincular');
-  await t.clicar('É você? Vincular');
-  await t.esperarTexto('Histórico Vinculado');
-  t.ok('Sugestões do histórico aparecem e o vínculo preenche o box');
+  await page.type('input[name=identificacao]', 'Ana Faggian');
+  await t.esperarTexto('É você? Ver competições');
+  await t.clicar('É você? Ver competições');
+  await t.esperarTexto('Quais competições são suas?');
+  await t.clicar('competição(ões)');
+  await t.esperarTexto('Histórico vinculado');
+  if (!(await page.$eval('input[name=nomeBox]', (e) => e.value))) throw new Error('O vínculo não preencheu o box');
+  t.ok('Sugestões do histórico aparecem, as competições são escolhidas e o vínculo preenche o box');
 
   await page.type('input[name=cpf]', '12345678900');
   await page.type('input[name=celular]', '21977776655');
@@ -67,7 +70,7 @@ export default () => executarTeste('fluxo-principal', async (t) => {
 
   // ---------------------------------------------------------------- Organizador
   await page.goto(`${BASE}/cadastro?tipo=ORGANIZADOR`, { waitUntil: 'networkidle0' });
-  await page.type('input[name=nomeCompleto]', 'Organizador E2E');
+  await page.type('input[name=identificacao]', 'Organizador E2E');
   await page.type('input[name=cpf]', CPF_DIGITOS);
   await page.type('input[name=celular]', '21977776655');
   await page.type('input[name=dataNascimento]', '01011985');

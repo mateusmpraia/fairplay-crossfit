@@ -1,6 +1,7 @@
 package br.com.uff.fairplay.dto;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public record CadastroAtletaDTO(
     String nomeCompleto,
@@ -13,6 +14,7 @@ public record CadastroAtletaDTO(
     String cidade,
     String estado,
     String nomeBox,
-    String perfil,              // "ATLETA" (padrão) ou "ORGANIZADOR"
-    String historicoNomeAtleta  // opcional: nome do perfil do histórico que o atleta escolheu vincular
+    String perfil,                     // "ATLETA" (padrão) ou "ORGANIZADOR"
+    List<Long> historicoIds,           // opcional: competições do histórico que o atleta marcou como suas
+    List<Long> historicoRecusadosIds   // opcional: competições que ele desmarcou (declarou não serem dele)
 ) {}

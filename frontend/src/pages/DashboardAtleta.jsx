@@ -5,6 +5,7 @@ import { dataIsoParaBr, dataIsoParaMesAno } from '../utils/formatacao';
 import Modal from '../components/Modal';
 import Alerta from '../components/Alerta';
 import ModalTrocarSenha from '../components/ModalTrocarSenha';
+import MeusVinculosHistorico from '../components/MeusVinculosHistorico';
 
 /** Visual do selo de colocação para o pódio (1º, 2º e 3º lugares). */
 const PODIO = {
@@ -75,6 +76,13 @@ export default function DashboardAtleta() {
       .catch(() => setErro('Não foi possível carregar os dados do atleta.'))
       .finally(() => setCarregando(false));
   }, [atletaId]);
+
+  // Depois de vincular ou desvincular competições, o histórico, os totais e a recomendação mudam
+  const recarregarPainel = () => {
+    api.get(`/atletas/${atletaId}/dashboard`)
+      .then(({ data }) => setDashboardData(data))
+      .catch(() => {});
+  };
 
   const abrirModalEditar = () => {
     setEditNome(dashboardData.nomeCompleto);
@@ -274,6 +282,8 @@ export default function DashboardAtleta() {
             </div>
           )}
         </section>
+
+        <MeusVinculosHistorico atletaId={atletaId} onAlterado={recarregarPainel} />
       </main>
 
       {modalSenhaAberto && <ModalTrocarSenha onFechar={() => setModalSenhaAberto(false)} />}

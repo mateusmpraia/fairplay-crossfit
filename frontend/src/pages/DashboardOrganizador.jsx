@@ -93,6 +93,17 @@ export default function DashboardOrganizador() {
   const [inscricaoParaExcluir, setInscricaoParaExcluir] = useState(null);
   const [processandoAcao, setProcessandoAcao] = useState(false);
 
+  // Inscrições cuja auditoria mudou sozinha (o histórico do atleta mudou depois da inscrição), por categoria
+  const [alteracoes, setAlteracoes] = useState([]);
+  const carregarAlteracoes = useCallback(() => {
+    api.get('/eventos/alteracoes-auditoria')
+      .then(({ data }) => setAlteracoes(data || []))
+      .catch(() => {});
+  }, []);
+  const alteracoesDoEvento = (eventoId) =>
+    alteracoes.filter((a) => a.eventoId === eventoId).reduce((total, a) => total + a.quantidade, 0);
+  const alteracoesDaCategoria = (categoriaId) => alteracoes.find((a) => a.categoriaId === categoriaId)?.quantidade || 0;
+
   const termoBusca = termoBuscaAtleta.trim();
   const buscaAtiva = termoBusca.length >= 3;
   const sugestoesVisiveis = buscaAtiva ? sugestoesAtletas : [];
@@ -104,6 +115,7 @@ export default function DashboardOrganizador() {
 
   const selecionarCategoria = useCallback(async (categoria) => {
     setCategoriaSelecionada(categoria);
+    carregarAlteracoes();
     setTermoBuscaAtleta('');
     setSugestoesAtletas([]);
     setColocacoesEditadas({});
@@ -113,7 +125,7 @@ export default function DashboardOrganizador() {
     } catch (err) {
       console.error('Erro ao carregar inscritos:', err);
     }
-  }, []);
+  }, [carregarAlteracoes]);
 
   const selecionarEvento = useCallback((evento) => {
     setEventoSelecionado(evento);
@@ -267,11 +279,23 @@ export default function DashboardOrganizador() {
       await api.delete(`/eventos/inscricoes/${inscricaoParaExcluir.id}`);
       setInscritos((prev) => prev.filter((ins) => ins.id !== inscricaoParaExcluir.id));
       setInscricaoParaExcluir(null);
+      carregarAlteracoes();
       setFeedbackInscricao({ tipo: 'sucesso', texto: 'Atleta removido da categoria com sucesso.' });
     } catch (err) {
       alert(mensagemDeErro(err, 'Não foi possível remover o atleta.'));
     } finally {
       setProcessandoAcao(false);
+    }
+  };
+
+  /** O organizador viu que a auditoria mudou: a inscrição deixa de aparecer em destaque. */
+  const marcarCiente = async (inscricao) => {
+    try {
+      const { data } = await api.post(`/eventos/inscricoes/${inscricao.id}/ciente`);
+      setInscritos((prev) => prev.map((ins) => (ins.id === data.id ? data : ins)));
+      carregarAlteracoes();
+    } catch (err) {
+      setFeedbackInscricao({ tipo: 'erro', texto: mensagemDeErro(err, 'Não foi possível registrar a ciência.') });
     }
   };
 
@@ -301,6 +325,7 @@ export default function DashboardOrganizador() {
       const atualizadas = new Map(data.map((ins) => [ins.id, ins]));
       setInscritos((prev) => prev.map((ins) => atualizadas.get(ins.id) || ins));
       setColocacoesEditadas({});
+      carregarAlteracoes();
       setFeedbackInscricao({ tipo: 'sucesso', texto: 'Resultados salvos. Eles já contam no histórico dos atletas.' });
     } catch (err) {
       setFeedbackInscricao({ tipo: 'erro', texto: mensagemDeErro(err, 'Erro ao salvar os resultados.') });
@@ -349,6 +374,7 @@ export default function DashboardOrganizador() {
         const resInscritos = await api.get(`/eventos/categorias/${categoriaSelecionada.id}/inscricoes`);
         setInscritos(resInscritos.data || []);
       }
+      carregarAlteracoes();
 
       setFeedbackInscricao({ tipo: 'sucesso', texto: 'Critérios atualizados e auditoria recalculada para todos os atletas.' });
     } catch (err) {
@@ -380,6 +406,7 @@ export default function DashboardOrganizador() {
       const categoriasRestantes = eventoSelecionado.categorias.filter((c) => c.id !== categoriaParaExcluir.id);
       atualizarEvento({ ...eventoSelecionado, categorias: categoriasRestantes });
       setCategoriaParaExcluir(null);
+      carregarAlteracoes();
 
       if (categoriasRestantes.length > 0) {
         selecionarCategoria(categoriasRestantes[0]);
@@ -403,6 +430,7 @@ export default function DashboardOrganizador() {
       const eventosRestantes = eventos.filter((ev) => ev.id !== eventoParaExcluir.id);
       setEventos(eventosRestantes);
       setEventoParaExcluir(null);
+      carregarAlteracoes();
 
       if (eventosRestantes.length > 0) {
         selecionarEvento(eventosRestantes[0]);
@@ -537,6 +565,9 @@ export default function DashboardOrganizador() {
                     <span>📅 {dataIsoParaBr(ev.dataInicio)}</span>
                     <span>📍 {ev.localizacao || 'Local a definir'}</span>
                   </div>
+                  {alteracoesDoEvento(ev.id) > 0 && (
+                    <span style={styles.badgeAlteracao}>⚠ {alteracoesDoEvento(ev.id)} mudança(s) na auditoria</span>
+                  )}
                 </div>
               );
             })
@@ -604,6 +635,11 @@ export default function DashboardOrganizador() {
                           }}
                         >
                           {descreverCategoria(cat)}
+                          {alteracoesDaCategoria(cat.id) > 0 && (
+                            <span style={styles.pillAlteracao} title="Inscrições cuja auditoria mudou depois da inscrição">
+                              ⚠ {alteracoesDaCategoria(cat.id)}
+                            </span>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -683,6 +719,10 @@ export default function DashboardOrganizador() {
                   </div>
 
                   <Alerta tipo={feedbackInscricao.tipo} style={{ marginBottom: '16px' }}>{feedbackInscricao.texto}</Alerta>
+                  <Alerta tipo="aviso" style={{ marginBottom: '16px' }}>
+                    {alteracoesDaCategoria(categoriaSelecionada.id) > 0 &&
+                      `⚠ ${alteracoesDaCategoria(categoriaSelecionada.id)} inscrição(ões) desta categoria mudaram de status depois da inscrição, porque o histórico do atleta foi atualizado (novo vínculo, resultado lançado ou nome alterado). Confira e marque "Ciente".`}
+                  </Alerta>
 
                   <div className="tabela-rolavel">
                     <table style={styles.tabela}>
@@ -710,7 +750,7 @@ export default function DashboardOrganizador() {
                             const categoriaRecomendada = ins.categoriaRecomendada || (isRegular ? categoriaSelecionada.nivel : 'Consulte regras');
 
                             return (
-                              <tr key={ins.id} style={styles.tr}>
+                              <tr key={ins.id} style={ins.auditoriaAlteradaEm ? { ...styles.tr, ...styles.trAlterada } : styles.tr}>
                                 <td style={{ ...styles.td, fontWeight: '700', color: '#ffffff' }}>
                                   {ins.atleta?.nomeCompleto}
                                 </td>
@@ -730,6 +770,17 @@ export default function DashboardOrganizador() {
                                   }}>
                                     {isRegular ? '● Regular' : '▲ Irregular'}
                                   </span>
+                                  {ins.auditoriaAlteradaEm && (
+                                    <div style={styles.alteracaoAuditoria}>
+                                      <span>
+                                        Era {ins.statusAnterior === 'REGULAR' ? 'Regular' : 'Irregular'}; mudou em{' '}
+                                        {new Date(ins.auditoriaAlteradaEm).toLocaleDateString('pt-BR')} após atualização do histórico do atleta.
+                                      </span>
+                                      <button type="button" className="link-botao" style={{ color: '#ffa500' }} onClick={() => marcarCiente(ins)}>
+                                        Ciente
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
                                 <td style={{ ...styles.td, fontSize: '0.82rem', color: isRegular ? '#a0aec0' : '#ffa500' }}>
                                   {ins.motivoIrregularidade || 'Cumpre todos os requisitos do regulamento.'}
@@ -1057,6 +1108,10 @@ const styles = {
   th: { padding: '14px 12px', color: '#718096', fontSize: '0.75rem', fontWeight: '700' },
   tr: { borderBottom: '1px solid #1a202c' },
   td: { padding: '16px 12px', fontSize: '0.88rem', verticalAlign: 'middle' },
+  trAlterada: { backgroundColor: 'rgba(255, 165, 0, 0.06)', boxShadow: 'inset 3px 0 0 #ffa500' },
+  alteracaoAuditoria: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', marginTop: '6px', maxWidth: '220px', fontSize: '0.74rem', color: '#ffa500', lineHeight: '1.35' },
+  badgeAlteracao: { display: 'inline-block', marginTop: '8px', fontSize: '0.72rem', fontWeight: '700', color: '#ffa500', border: '1px solid rgba(255, 165, 0, 0.4)', borderRadius: '6px', padding: '2px 8px' },
+  pillAlteracao: { marginLeft: '6px', fontSize: '0.72rem', fontWeight: '800', color: '#000000', backgroundColor: '#ffa500', borderRadius: '10px', padding: '1px 7px' },
   statusBadge: { padding: '4px 10px', borderRadius: '6px', border: '1px solid', fontWeight: '800', fontSize: '0.72rem', display: 'inline-block', whiteSpace: 'nowrap' },
   badgeCategoriaRec: { backgroundColor: 'rgba(0, 191, 255, 0.12)', color: '#00bfff', border: '1px solid rgba(0, 191, 255, 0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: '700', fontSize: '0.78rem', display: 'inline-block', whiteSpace: 'nowrap' },
   inputColocacao: { width: '64px', padding: '8px', borderRadius: '6px', backgroundColor: '#0a0c0e', border: '1px solid #2d3748', color: '#ffffff', fontSize: '0.9rem', textAlign: 'center', outline: 'none' },

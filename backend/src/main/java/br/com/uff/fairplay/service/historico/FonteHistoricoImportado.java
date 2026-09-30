@@ -10,7 +10,8 @@ import java.util.List;
 
 /**
  * Resultados de competições externas importados para a tabela historico_atletas (sem data).
- * No painel entram só os registros vinculados ao atleta; na auditoria, também os que têm o mesmo nome.
+ * No painel entram só os registros vinculados ao atleta; na auditoria, também os que têm o mesmo nome
+ * (menos os que ele declarou não serem dele e os já vinculados a outra conta).
  */
 @Component
 @Order(2)
@@ -25,7 +26,7 @@ public class FonteHistoricoImportado implements FonteHistorico {
     @Override
     public List<RegistroCompeticao> buscar(Atleta atleta, ConsultaHistorico consulta) {
         List<HistoricoAtleta> registros = consulta.ehAuditoria()
-                ? historicoAtletaRepository.buscarHistoricoPorAtletaIdOuNome(atleta.getId(), atleta.getNomeCompleto())
+                ? historicoAtletaRepository.buscarHistoricoParaAuditoria(atleta.getId(), atleta.getNomeCompleto())
                 : historicoAtletaRepository.buscarHistoricoPorAtletaId(atleta.getId());
 
         return registros.stream()

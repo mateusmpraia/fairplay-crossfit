@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api, { encerrarSessao } from '../api';
 import { estiloFeedback } from '../tema';
 import ModalConfirmacao from '../components/ModalConfirmacao';
+import PedidosDesvinculo from '../components/PedidosDesvinculo';
 
 const FILTROS_PERFIL = ['TODOS', 'ATLETA', 'ORGANIZADOR'];
 
@@ -74,6 +75,8 @@ export default function AdminUsuarios() {
             {mensagem.texto}
           </div>
         )}
+
+        <PedidosDesvinculo />
 
         {/* Filtros e busca */}
         <div style={styles.filterBar}>

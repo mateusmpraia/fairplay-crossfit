@@ -10,10 +10,11 @@ import br.com.uff.fairplay.exception.RecursoNaoEncontradoException;
 import br.com.uff.fairplay.exception.RegraNegocioException;
 import br.com.uff.fairplay.model.Atleta;
 import br.com.uff.fairplay.repository.AtletaRepository;
-import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
+import br.com.uff.fairplay.service.historico.VinculoHistoricoService;
 import br.com.uff.fairplay.repository.InscricaoEventoRepository;
 import br.com.uff.fairplay.security.SessaoService;
 import br.com.uff.fairplay.security.UsuarioLogado;
+import br.com.uff.fairplay.service.AuditoriaInscricaoService;
 import br.com.uff.fairplay.service.RecomendacaoCategoriaService;
 import br.com.uff.fairplay.service.ValidacaoCadastro;
 import br.com.uff.fairplay.service.ValidacaoCadastro.DadosCadastro;
@@ -37,29 +38,33 @@ public class AtletaController {
 
     private final AtletaRepository atletaRepository;
     private final RecomendacaoCategoriaService recomendacaoCategoriaService;
-    private final HistoricoAtletaRepository historicoAtletaRepository;
+    private final VinculoHistoricoService vinculoHistoricoService;
     private final InscricaoEventoRepository inscricaoEventoRepository;
     private final PasswordEncoder passwordEncoder;
     private final SessaoService sessaoService;
+    private final AuditoriaInscricaoService auditoriaService;
 
     public AtletaController(AtletaRepository atletaRepository,
                             RecomendacaoCategoriaService recomendacaoCategoriaService,
-                            HistoricoAtletaRepository historicoAtletaRepository,
+                            VinculoHistoricoService vinculoHistoricoService,
                             InscricaoEventoRepository inscricaoEventoRepository,
                             PasswordEncoder passwordEncoder,
-                            SessaoService sessaoService) {
+                            SessaoService sessaoService,
+                            AuditoriaInscricaoService auditoriaService) {
         this.atletaRepository = atletaRepository;
         this.recomendacaoCategoriaService = recomendacaoCategoriaService;
-        this.historicoAtletaRepository = historicoAtletaRepository;
+        this.vinculoHistoricoService = vinculoHistoricoService;
         this.inscricaoEventoRepository = inscricaoEventoRepository;
         this.passwordEncoder = passwordEncoder;
         this.sessaoService = sessaoService;
+        this.auditoriaService = auditoriaService;
     }
 
     /**
      * Cadastra atleta ou organizador. CPF, e-mail e celular são únicos por perfil.
-     * Se o atleta vincular um histórico que já tem um atleta pendente (criado quando alguém o inscreveu
-     * num evento), esse registro vira a conta dele — e as inscrições feitas antes passam a ser suas.
+     * O atleta pode vincular já no cadastro as competições do histórico que marcou como suas; se alguma
+     * estava com um atleta pendente (criado quando alguém o inscreveu num evento), as inscrições feitas
+     * antes passam a ser dele (ver {@link VinculoHistoricoService#vincular}).
      */
     @PostMapping("/cadastro")
     @Transactional
@@ -77,12 +82,7 @@ public class AtletaController {
             return ResponseEntity.badRequest().body("Este Celular já está cadastrado como " + perfilNome + ".");
         }
 
-        String historicoNome = dto.historicoNomeAtleta() != null ? dto.historicoNomeAtleta().trim() : "";
-        boolean vinculaHistorico = Atleta.PERFIL_ATLETA.equals(dados.perfil()) && !historicoNome.isEmpty();
-
-        Atleta atleta = vinculaHistorico
-                ? atletaRepository.buscarPendenteDoHistorico(historicoNome).orElseGet(Atleta::new)
-                : new Atleta();
+        Atleta atleta = new Atleta();
         atleta.setNomeCompleto(dados.nomeCompleto());
         atleta.setCpf(dados.cpf());
         atleta.setDataNascimento(dados.dataNascimento());
@@ -97,8 +97,8 @@ public class AtletaController {
 
         Atleta salvo = atletaRepository.save(atleta);
 
-        if (vinculaHistorico) {
-            historicoAtletaRepository.vincularHistoricoAoAtleta(salvo.getId(), historicoNome);
+        if (Atleta.PERFIL_ATLETA.equals(dados.perfil())) {
+            vinculoHistoricoService.vincular(salvo, dto.historicoIds(), dto.historicoRecusadosIds());
         }
 
         return ResponseEntity.status(HttpStatus.CREATED).body(salvo);
@@ -151,6 +151,7 @@ public class AtletaController {
                                                                @AuthenticationPrincipal UsuarioLogado usuario) {
         exigirProprioAtleta(id, usuario);
         Atleta atleta = buscarAtleta(id);
+        String nomeAntes = atleta.getNomeCompleto();
 
         if (dto.nomeCompleto() != null && !dto.nomeCompleto().isBlank()) {
             if (dto.nomeCompleto().trim().length() < 3) {
@@ -166,6 +167,10 @@ public class AtletaController {
         }
 
         Atleta atualizado = atletaRepository.save(atleta);
+        // A auditoria também considera o histórico com o nome idêntico ao da conta
+        if (!atualizado.getNomeCompleto().equalsIgnoreCase(nomeAntes)) {
+            auditoriaService.reauditarInscricoesEmAberto(atualizado.getId());
+        }
 
         return ResponseEntity.ok(Map.of(
                 "id", atualizado.getId(),

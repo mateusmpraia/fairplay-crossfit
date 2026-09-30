@@ -6,6 +6,7 @@ import br.com.uff.fairplay.service.RegrasElegibilidade.ResultadoAuditoria;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.EnumSet;
 import java.util.List;
 
 import static br.com.uff.fairplay.model.CategoriaCompeticao.*;
@@ -20,6 +21,12 @@ class RegrasElegibilidadeTest {
 
     private static Participacao p(br.com.uff.fairplay.model.CategoriaCompeticao categoria, int colocacao) {
         return new Participacao(categoria, colocacao);
+    }
+
+    /** Auditoria num evento que oferece todas as categorias ao atleta. */
+    private static ResultadoAuditoria auditar(br.com.uff.fairplay.model.CategoriaCompeticao nivel, CriteriosEvento criterios,
+                                              List<Participacao> participacoes) {
+        return RegrasElegibilidade.auditar(nivel, criterios, participacoes, EnumSet.allOf(br.com.uff.fairplay.model.CategoriaCompeticao.class));
     }
 
     @Nested
@@ -46,6 +53,15 @@ class RegrasElegibilidadeTest {
         }
 
         @Test
+        void generoCompativelSegueAsMesmasRegras() {
+            assertThat(RegrasElegibilidade.generoCompativel("MASCULINO", "Masculino")).isTrue();
+            assertThat(RegrasElegibilidade.generoCompativel("MASCULINO", "Misto")).isTrue();
+            assertThat(RegrasElegibilidade.generoCompativel("MASCULINO", "Feminino")).isFalse();
+            assertThat(RegrasElegibilidade.generoCompativel("FEMININO", "Masculino")).isFalse();
+            assertThat(RegrasElegibilidade.generoCompativel("OUTRO", "Feminino")).isTrue();
+        }
+
+        @Test
         void femininoNaoEntraEmMasculina() {
             assertThatThrownBy(() -> RegrasElegibilidade.validarGenero("FEMININO", "Masculino"))
                     .isInstanceOf(RegraNegocioException.class)
@@ -58,69 +74,91 @@ class RegrasElegibilidadeTest {
 
         @Test
         void semHistoricoFicaRegular() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of());
+            ResultadoAuditoria r = auditar(RX, TODOS_LIGADOS, List.of());
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.REGULAR);
             assertThat(r.categoriaRecomendada()).isEqualTo("RX");
         }
 
         @Test
         void campeaoNaCategoriaFicaIrregularERecomendaAProxima() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, TODOS_LIGADOS, List.of(p(SCALE, 1)));
+            ResultadoAuditoria r = auditar(SCALE, TODOS_LIGADOS, List.of(p(SCALE, 1)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
             assertThat(r.categoriaRecomendada()).isEqualTo("Intermediário");
         }
 
         @Test
         void campeaoEmCategoriaAcimaTambemFicaIrregular() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, TODOS_LIGADOS, List.of(p(RX, 1)));
+            ResultadoAuditoria r = auditar(SCALE, TODOS_LIGADOS, List.of(p(RX, 1)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
         }
 
         @Test
         void campeaoMasterNaoContaComoCategoriaAcimaDeRx() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of(p(MASTER, 1)));
+            ResultadoAuditoria r = auditar(RX, TODOS_LIGADOS, List.of(p(MASTER, 1)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.REGULAR);
         }
 
         @Test
         void campeaoEliteContaComoCategoriaAcimaDeRx() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of(p(ELITE, 1)));
+            ResultadoAuditoria r = auditar(RX, TODOS_LIGADOS, List.of(p(ELITE, 1)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
         }
 
         @Test
         void campeaoEliteContinuaRegularNaElite() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(ELITE, TODOS_LIGADOS, List.of(p(ELITE, 1), p(ELITE, 1), p(ELITE, 2)));
+            ResultadoAuditoria r = auditar(ELITE, TODOS_LIGADOS, List.of(p(ELITE, 1), p(ELITE, 1), p(ELITE, 2)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.REGULAR);
             assertThat(r.categoriaRecomendada()).isEqualTo("Elite");
         }
 
         @Test
         void campeaoRxEPromovidoParaEliteNaoParaMaster() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of(p(RX, 1)));
+            ResultadoAuditoria r = auditar(RX, TODOS_LIGADOS, List.of(p(RX, 1)));
             assertThat(r.categoriaRecomendada()).isEqualTo("Elite");
         }
 
         @Test
         void tresPodiosNaMesmaCategoria() {
             List<Participacao> historico = List.of(p(RX, 2), p(RX, 3), p(RX, 2));
-            assertThat(RegrasElegibilidade.auditar(RX, new CriteriosEvento(false, true, false), historico).status())
+            assertThat(auditar(RX, new CriteriosEvento(false, true, false), historico).status())
                     .isEqualTo(RegrasElegibilidade.IRREGULAR);
-            assertThat(RegrasElegibilidade.auditar(RX, new CriteriosEvento(false, true, false), historico.subList(0, 2)).status())
+            assertThat(auditar(RX, new CriteriosEvento(false, true, false), historico.subList(0, 2)).status())
                     .isEqualTo(RegrasElegibilidade.REGULAR);
         }
 
         @Test
         void tresParticipacoesNaMesmaCategoria() {
             List<Participacao> historico = List.of(p(SCALE, 10), p(SCALE, 12), p(SCALE, 8));
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, new CriteriosEvento(false, false, true), historico);
+            ResultadoAuditoria r = auditar(SCALE, new CriteriosEvento(false, false, true), historico);
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
             assertThat(r.motivo()).contains("3 vezes");
         }
 
         @Test
+        void campeaoRxSemEliteNoEventoContinuaRegularNoRx() {
+            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of(p(RX, 1)), EnumSet.of(SCALE, RX, MASTER));
+            assertThat(r.status()).isEqualTo(RegrasElegibilidade.REGULAR);
+            assertThat(r.categoriaRecomendada()).isEqualTo("RX");
+            assertThat(r.motivo()).contains("não tem categoria acima de RX");
+        }
+
+        @Test
+        void campeaoRxComEliteNoEventoFicaIrregular() {
+            ResultadoAuditoria r = RegrasElegibilidade.auditar(RX, TODOS_LIGADOS, List.of(p(RX, 1)), EnumSet.of(RX, ELITE));
+            assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
+            assertThat(r.categoriaRecomendada()).isEqualTo("Elite");
+        }
+
+        @Test
+        void recomendaAMenorCategoriaDisponivelAcima() {
+            ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, TODOS_LIGADOS, List.of(p(SCALE, 1)), EnumSet.of(SCALE, RX, ELITE));
+            assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
+            assertThat(r.categoriaRecomendada()).isEqualTo("RX");
+        }
+
+        @Test
         void criteriosDesligadosNaoGeramInfracao() {
-            ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, TODOS_DESLIGADOS, List.of(p(SCALE, 1), p(SCALE, 1), p(SCALE, 1)));
+            ResultadoAuditoria r = auditar(SCALE, TODOS_DESLIGADOS, List.of(p(SCALE, 1), p(SCALE, 1), p(SCALE, 1)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.REGULAR);
         }
     }

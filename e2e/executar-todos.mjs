@@ -2,6 +2,8 @@
 import fluxoPrincipal from './01-fluxo-principal.mjs';
 import inscricaoPorPlanilha from './02-inscricao-por-planilha.mjs';
 import resultadosEConta from './03-resultados-e-conta.mjs';
+import vinculosHistorico from './04-vinculos-historico.mjs';
+import reauditoria from './05-reauditoria.mjs';
 import { API, BASE } from './apoio.mjs';
 
 for (const [nome, url] of [['backend', `${API}/atletas/historico/sugestoes?nome=abc`], ['frontend', BASE]]) {
@@ -14,7 +16,7 @@ for (const [nome, url] of [['backend', `${API}/atletas/historico/sugestoes?nome=
 }
 
 const resultados = [];
-for (const teste of [fluxoPrincipal, inscricaoPorPlanilha, resultadosEConta]) {
+for (const teste of [fluxoPrincipal, inscricaoPorPlanilha, resultadosEConta, vinculosHistorico, reauditoria]) {
   resultados.push(await teste());
 }
 
