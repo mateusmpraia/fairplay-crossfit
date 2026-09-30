@@ -120,7 +120,9 @@ O histórico de competições (`historico_atletas`) é importado pelos scripts P
 |---|---|
 | `atletas` | Contas de atletas e organizadores, e atletas pendentes do histórico (perfil `HISTORICO`) |
 | `historico_atletas` | Resultados de competições importados |
-| `atletas_historico_vinculos` | Quais registros do histórico pertencem a cada atleta |
+| `atletas_historico_vinculos` | Quais registros do histórico pertencem a cada atleta (escolhidos competição por competição) |
+| `atletas_historico_recusas` | Registros do histórico que o atleta declarou não serem dele (a auditoria os ignora) |
+| `pedidos_desvinculo_historico` | Pedidos de desvínculo feitos depois do prazo livre, decididos pelo administrador |
 | `eventos`, `categorias_evento` | Eventos criados pelos organizadores e suas categorias |
 | `inscricoes_evento` | Inscrições, resultado da auditoria e colocação final |
 | `sessoes` | Logins ativos (tokens) |
@@ -135,7 +137,18 @@ A escada de promoção é **Iniciante → Scale → Intermediário → RX → El
 
 - **Auditoria da inscrição** (critérios ligados pelo organizador em cada evento):
   campeão na categoria ou acima, 3 pódios na categoria, ou 3 participações na categoria → inscrição **irregular**,
-  com recomendação da categoria seguinte.
+  com recomendação da menor categoria acima que o evento oferece ao atleta.
+- **Só se sobe para categoria que existe:** se o evento não tem categoria acima da inscrita com o mesmo formato
+  e gênero compatível (ex.: não tem Elite feminina), a inscrição fica **regular** e o diagnóstico explica o motivo.
+- **Reauditoria automática:** a auditoria fica gravada na inscrição e é refeita quando o histórico do atleta muda
+  (vínculo feito ou desfeito, nome alterado, resultado lançado ou apagado) e quando o organizador muda critérios ou
+  categorias. Só inscrições em aberto (sem colocação, em eventos que não terminaram) são refeitas. Mudanças de status
+  causadas pelo histórico aparecem em destaque para o organizador até ele marcar "Ciente".
+- **Histórico do atleta:** ele vincula as competições do histórico importado uma a uma (pode ter usado nomes
+  diferentes, e o mesmo nome pode ser de outra pessoa). Desfazer um vínculo é livre por 24 horas
+  (`fairplay.vinculo.prazo-desvinculo-horas`); depois, só com pedido aprovado pelo administrador.
+  A auditoria também considera competições com nome idêntico ao da conta, exceto as que o atleta declarou não serem
+  dele e as vinculadas à conta de outra pessoa.
 - **Elite e Master não sobem:** um campeão Elite continua Elite, e nessas categorias os critérios não se aplicam.
 - **Master fica fora da escada:** um título no Master não conta como "categoria acima" de RX (nem de nenhuma outra).
 - **Recomendação do painel do atleta:** usa as mesmas regras sobre todo o histórico dele.
