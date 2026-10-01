@@ -64,7 +64,8 @@ public class AtletaController {
      * Cadastra atleta ou organizador. CPF, e-mail e celular são únicos por perfil.
      * O atleta pode vincular já no cadastro as competições do histórico que marcou como suas; se alguma
      * estava com um atleta pendente (criado quando alguém o inscreveu num evento), as inscrições feitas
-     * antes passam a ser dele (ver {@link VinculoHistoricoService#vincular}).
+     * antes passam a ser dele (ver {@link VinculoHistoricoService#vincular}). O mesmo vale para quem foi
+     * inscrito por um organizador sem cadastro, com o mesmo CPF.
      */
     @PostMapping("/cadastro")
     @Transactional
@@ -98,6 +99,10 @@ public class AtletaController {
         Atleta salvo = atletaRepository.save(atleta);
 
         if (Atleta.PERFIL_ATLETA.equals(dados.perfil())) {
+            // Inscrito antes por um organizador, sem cadastro, com este CPF: as inscrições passam a ser da conta
+            atletaRepository.findByCpfAndPerfil(salvo.getCpf(), Atleta.PERFIL_SEM_CADASTRO)
+                    .ifPresent(semCadastro -> vinculoHistoricoService.incorporarPendente(semCadastro.getId(), salvo));
+            // Vincula o histórico escolhido e reaudita as inscrições em aberto (inclusive as herdadas)
             vinculoHistoricoService.vincular(salvo, dto.historicoIds(), dto.historicoRecusadosIds());
         }
 

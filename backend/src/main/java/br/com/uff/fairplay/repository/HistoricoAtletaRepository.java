@@ -40,6 +40,16 @@ public interface HistoricoAtletaRepository extends JpaRepository<HistoricoAtleta
     """)
     List<HistoricoAtleta> buscarHistoricoPorAtletaId(@Param("atletaId") Long atletaId);
 
+    /** Uma linha de {@link #contarVinculosPorAtleta}. */
+    interface TotalDeVinculos {
+        Long getAtletaId();
+        Long getTotal();
+    }
+
+    /** Quantas competições do histórico estão vinculadas a cada atleta (só aparecem atletas com pelo menos uma). */
+    @Query("SELECT v.atletaId AS atletaId, COUNT(v) AS total FROM AtletaHistoricoVinculo v GROUP BY v.atletaId")
+    List<TotalDeVinculos> contarVinculosPorAtleta();
+
     /** Atletas vinculados a um registro do histórico (normalmente um só). */
     @Query("SELECT v.atletaId FROM AtletaHistoricoVinculo v WHERE v.historico.id = :historicoId ORDER BY v.atletaId")
     List<Long> buscarAtletasVinculados(@Param("historicoId") Long historicoId);

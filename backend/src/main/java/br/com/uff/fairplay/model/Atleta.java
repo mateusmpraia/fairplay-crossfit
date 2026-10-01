@@ -16,6 +16,9 @@ import java.time.LocalDate;
  *   <li>HISTORICO: atleta pendente, criado ao inscrever alguém que só existe no histórico importado.
  *       Tem só nome, gênero e box; quando a pessoa vincula esse histórico (no cadastro ou no painel), o
  *       pendente é incorporado à conta dela (ver {@code VinculoHistoricoService#vincular}).</li>
+ *   <li>SEM_CADASTRO: atleta inscrito pelo organizador sem cadastro nem histórico no sistema. Tem nome,
+ *       gênero, box e, opcionalmente, CPF; se a pessoa se cadastrar depois com esse CPF, as inscrições
+ *       passam para a conta dela (ver {@code AtletaController#cadastrarAtleta}).</li>
  * </ul>
  * O esquema da tabela é definido pelas migrações do Liquibase.
  */
@@ -29,6 +32,7 @@ public class Atleta {
     public static final String PERFIL_ATLETA = "ATLETA";
     public static final String PERFIL_ORGANIZADOR = "ORGANIZADOR";
     public static final String PERFIL_HISTORICO = "HISTORICO";
+    public static final String PERFIL_SEM_CADASTRO = "SEM_CADASTRO";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -6,6 +6,7 @@ import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
+import br.com.uff.fairplay.dto.InscreverSemCadastroDTO;
 import br.com.uff.fairplay.dto.InscricaoLoteDTO;
 import br.com.uff.fairplay.dto.LancarResultadosDTO;
 import br.com.uff.fairplay.dto.ResultadoInscricaoLoteDTO;
@@ -104,6 +105,13 @@ public class EventoController {
     public ResponseEntity<List<InscricaoEvento>> listarInscricoesPorCategoria(@PathVariable Long categoriaId,
                                                                               @AuthenticationPrincipal UsuarioLogado organizador) {
         return ResponseEntity.ok(eventoService.listarInscricoes(categoriaId, organizador.id()));
+    }
+
+    /** Inscreve um atleta que não tem cadastro nem histórico no sistema (CPF opcional). */
+    @PostMapping("/inscricoes/sem-cadastro")
+    public ResponseEntity<InscricaoEvento> inscreverSemCadastro(@RequestBody InscreverSemCadastroDTO dto,
+                                                                @AuthenticationPrincipal UsuarioLogado organizador) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(eventoService.inscreverSemCadastro(dto, organizador.id()));
     }
 
     /** Inscrições cuja auditoria mudou sozinha (histórico do atleta mudou) e o organizador ainda não viu, por categoria. */

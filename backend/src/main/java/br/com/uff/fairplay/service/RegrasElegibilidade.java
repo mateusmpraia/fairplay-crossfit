@@ -23,8 +23,12 @@ public final class RegrasElegibilidade {
 
     private RegrasElegibilidade() {}
 
-    /** Critérios de promoção que o organizador ligou no evento. */
-    public record CriteriosEvento(boolean campeaoSobe, boolean tresPodiosSobe, boolean tresParticipacoesSobe) {}
+    /**
+     * Critérios de promoção que o organizador ligou no evento.
+     *
+     * @param naoDesce quem já competiu numa categoria acima não pode se inscrever numa abaixo
+     */
+    public record CriteriosEvento(boolean campeaoSobe, boolean tresPodiosSobe, boolean tresParticipacoesSobe, boolean naoDesce) {}
 
     public record ResultadoAuditoria(String status, String categoriaRecomendada, String motivo) {}
 
@@ -69,10 +73,16 @@ public final class RegrasElegibilidade {
     }
 
     /**
-     * Audita a inscrição numa categoria. Cada critério ligado que o atleta viola vira uma infração. A inscrição
-     * só fica IRREGULAR se o evento oferecer ao atleta alguma categoria acima da inscrita (a recomendação é a
-     * menor delas): não faz sentido obrigar a subir para uma categoria que o evento não tem. Em categorias sem
-     * nível acima (Elite e Master) os critérios de promoção não se aplicam.
+     * Audita a inscrição numa categoria. Cada critério ligado que o atleta viola vira uma infração, e cada
+     * infração aponta para onde ele deveria ir:
+     * <ul>
+     *   <li>campeão, 3 pódios e 3 participações: a menor categoria acima da inscrita que o evento oferece;</li>
+     *   <li>"não desce": a categoria mais alta que o evento oferece entre a inscrita e a mais alta em que ele
+     *       já competiu (quem competiu no Elite vai para o RX se o evento não tiver Elite).</li>
+     * </ul>
+     * Uma infração sem destino no evento não conta: não faz sentido obrigar a subir para uma categoria que o
+     * evento não tem. A inscrição fica IRREGULAR se sobrar alguma infração, e a recomendação é o destino mais alto.
+     * Em categorias sem nível acima (Elite e Master) os critérios não se aplicam.
      *
      * @param niveisDisponiveis níveis das categorias do evento em que o atleta pode competir
      *                          (mesmo formato da categoria inscrita e gênero compatível)
@@ -84,13 +94,13 @@ public final class RegrasElegibilidade {
                     "Categoria " + nivel.getDescricao() + " não tem nível acima: os critérios de promoção não se aplicam.");
         }
 
-        List<String> infracoes = new ArrayList<>();
+        List<String> infracoesDeSubida = new ArrayList<>();
 
         if (criterios.campeaoSobe()) {
             boolean jaFoiCampeaoAquiOuAcima = participacoes.stream()
                     .anyMatch(p -> p.colocacao() == 1 && p.categoria().igualOuAcimaDe(nivel));
             if (jaFoiCampeaoAquiOuAcima) {
-                infracoes.add("Já conquistou o 1º lugar na categoria " + nivel.getDescricao() + " ou superior.");
+                infracoesDeSubida.add("Já conquistou o 1º lugar na categoria " + nivel.getDescricao() + " ou superior.");
             }
         }
 
@@ -99,30 +109,72 @@ public final class RegrasElegibilidade {
                     .filter(p -> p.categoria() == nivel && p.colocacao() >= 1 && p.colocacao() <= 3)
                     .count();
             if (podios >= LIMITE_REPETICOES) {
-                infracoes.add("Possui " + podios + " pódios na categoria " + nivel.getDescricao() + " (limite: " + LIMITE_REPETICOES + ").");
+                infracoesDeSubida.add("Possui " + podios + " pódios na categoria " + nivel.getDescricao() + " (limite: " + LIMITE_REPETICOES + ").");
             }
         }
 
         if (criterios.tresParticipacoesSobe()) {
             long vezes = participacoes.stream().filter(p -> p.categoria() == nivel).count();
             if (vezes >= LIMITE_REPETICOES) {
-                infracoes.add("Já participou " + vezes + " vezes da categoria " + nivel.getDescricao() + ".");
+                infracoesDeSubida.add("Já participou " + vezes + " vezes da categoria " + nivel.getDescricao() + ".");
             }
         }
 
-        if (infracoes.isEmpty()) {
-            return new ResultadoAuditoria(REGULAR, nivel.getDescricao(), "Atleta cumpre todos os critérios definidos.");
+        List<String> infracoes = new ArrayList<>();
+        List<String> semDestino = new ArrayList<>();
+        Optional<CategoriaCompeticao> destino = Optional.empty();
+
+        if (!infracoesDeSubida.isEmpty()) {
+            Optional<CategoriaCompeticao> acima = niveisDisponiveis.stream()
+                    .filter(n -> acimaDe(n, nivel))
+                    .min(Comparator.comparingInt(CategoriaCompeticao::getNivel));
+            if (acima.isPresent()) {
+                infracoes.addAll(infracoesDeSubida);
+                destino = acima;
+            } else {
+                semDestino.add(String.join(" | ", infracoesDeSubida) + " Mas o evento não tem categoria acima de "
+                        + nivel.getDescricao() + " para este atleta.");
+            }
         }
 
-        Optional<CategoriaCompeticao> destino = niveisDisponiveis.stream()
-                .filter(n -> n != nivel && n.igualOuAcimaDe(nivel))
-                .min(Comparator.comparingInt(CategoriaCompeticao::getNivel));
-        if (destino.isEmpty()) {
-            return new ResultadoAuditoria(REGULAR, nivel.getDescricao(),
-                    String.join(" | ", infracoes) + " Mas o evento não tem categoria acima de " + nivel.getDescricao()
-                            + " para este atleta, então ele pode competir nela.");
+        if (criterios.naoDesce()) {
+            Optional<CategoriaCompeticao> maisAltaDisputada = participacoes.stream()
+                    .map(Participacao::categoria)
+                    .filter(c -> acimaDe(c, nivel))
+                    .max(Comparator.comparingInt(CategoriaCompeticao::getNivel));
+            if (maisAltaDisputada.isPresent()) {
+                CategoriaCompeticao teto = maisAltaDisputada.get();
+                String infracao = "Já competiu na categoria " + teto.getDescricao() + ", acima de " + nivel.getDescricao() + ".";
+                Optional<CategoriaCompeticao> entre = niveisDisponiveis.stream()
+                        .filter(n -> acimaDe(n, nivel) && teto.igualOuAcimaDe(n))
+                        .max(Comparator.comparingInt(CategoriaCompeticao::getNivel));
+                if (entre.isPresent()) {
+                    infracoes.add(infracao);
+                    destino = Optional.of(maisAlta(destino.orElse(entre.get()), entre.get()));
+                } else {
+                    semDestino.add(infracao + " Mas o evento não tem categoria acima de " + nivel.getDescricao()
+                            + " até " + teto.getDescricao() + " para este atleta.");
+                }
+            }
         }
-        return new ResultadoAuditoria(IRREGULAR, destino.get().getDescricao(), String.join(" | ", infracoes));
+
+        if (destino.isPresent()) {
+            return new ResultadoAuditoria(IRREGULAR, destino.get().getDescricao(), String.join(" | ", infracoes));
+        }
+        if (!semDestino.isEmpty()) {
+            return new ResultadoAuditoria(REGULAR, nivel.getDescricao(),
+                    String.join(" | ", semDestino) + " Por isso pode competir em " + nivel.getDescricao() + ".");
+        }
+        return new ResultadoAuditoria(REGULAR, nivel.getDescricao(), "Atleta cumpre todos os critérios definidos.");
+    }
+
+    /** Se {@code categoria} está estritamente acima de {@code nivel} na escada (Master fica fora). */
+    private static boolean acimaDe(CategoriaCompeticao categoria, CategoriaCompeticao nivel) {
+        return categoria != nivel && categoria.igualOuAcimaDe(nivel);
+    }
+
+    private static CategoriaCompeticao maisAlta(CategoriaCompeticao a, CategoriaCompeticao b) {
+        return a.getNivel() >= b.getNivel() ? a : b;
     }
 
     /** Ordem em que as categorias são avaliadas para promoção (da mais alta para a mais baixa). */

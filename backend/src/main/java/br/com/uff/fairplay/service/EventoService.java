@@ -5,6 +5,7 @@ import br.com.uff.fairplay.dto.AtualizarRegrasDTO;
 import br.com.uff.fairplay.dto.CriarCategoriaDTO;
 import br.com.uff.fairplay.dto.CriarEventoDTO;
 import br.com.uff.fairplay.dto.InscreverAtletaDTO;
+import br.com.uff.fairplay.dto.InscreverSemCadastroDTO;
 import br.com.uff.fairplay.dto.LancarResultadosDTO;
 import br.com.uff.fairplay.dto.ResultadoInscricaoLoteDTO;
 import br.com.uff.fairplay.exception.AcessoNegadoException;
@@ -20,6 +21,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -86,6 +88,8 @@ public class EventoService {
         evento.setRegraCampeaoSobe(dto.regraCampeaoSobe());
         evento.setRegraTresPodiosSobe(dto.regraTresPodiosSobe());
         evento.setRegraTresParticipacoesSobe(dto.regraTresParticipacoesSobe());
+        // Opcional para não quebrar quem ainda não envia o critério (ex.: a versão anterior da tela)
+        evento.setRegraNaoDesce(Boolean.TRUE.equals(dto.regraNaoDesce()));
 
         for (CriarCategoriaDTO catDto : dto.categorias()) {
             evento.getCategorias().add(novaCategoria(evento, catDto));
@@ -114,6 +118,9 @@ public class EventoService {
         evento.setRegraCampeaoSobe(regras.regraCampeaoSobe());
         evento.setRegraTresPodiosSobe(regras.regraTresPodiosSobe());
         evento.setRegraTresParticipacoesSobe(regras.regraTresParticipacoesSobe());
+        if (regras.regraNaoDesce() != null) {
+            evento.setRegraNaoDesce(regras.regraNaoDesce());
+        }
         eventoRepository.save(evento);
         reauditarEvento(evento);
         return evento;
@@ -324,6 +331,66 @@ public class EventoService {
         List<InscricaoEvento> salvas = inscricaoEventoRepository.saveAll(inscricoes.values());
         auditoriaService.reauditarInscricoesEmAberto(atletasAlterados);
         return salvas;
+    }
+
+    /**
+     * Inscreve um atleta que não tem cadastro nem histórico no sistema. Se o CPF for informado e já houver
+     * um atleta sem cadastro com ele (inscrito antes em outro evento), reaproveita esse registro; se o CPF
+     * for de uma conta de atleta, recusa, pois ele deve ser buscado e inscrito normalmente.
+     */
+    @Transactional
+    public InscricaoEvento inscreverSemCadastro(InscreverSemCadastroDTO dto, Long organizadorId) {
+        CategoriaEvento categoria = buscarCategoriaDoOrganizador(dto.categoriaEventoId(), organizadorId);
+
+        String nome = dto.nomeCompleto() != null ? dto.nomeCompleto().trim().replaceAll("\\s+", " ") : "";
+        if (nome.length() < 3) {
+            throw new RegraNegocioException("Informe o nome completo do atleta.");
+        }
+
+        String cpf = null;
+        if (dto.cpf() != null && !apenasDigitos(dto.cpf()).isEmpty()) {
+            if (!ValidacaoCadastro.cpfValido(dto.cpf())) {
+                throw new RegraNegocioException("CPF inválido. Confira os números ou deixe o campo em branco.");
+            }
+            cpf = ValidacaoCadastro.formatarCpf(dto.cpf());
+            if (atletaRepository.existsByCpfAndPerfil(cpf, Atleta.PERFIL_ATLETA)) {
+                throw new RegraNegocioException("Já existe um atleta cadastrado com este CPF. Busque pelo CPF para inscrevê-lo.");
+            }
+            Optional<Atleta> jaInscritoAntes = atletaRepository.findByCpfAndPerfil(cpf, Atleta.PERFIL_SEM_CADASTRO);
+            if (jaInscritoAntes.isPresent()) {
+                RegrasElegibilidade.validarGenero(jaInscritoAntes.get().getGenero(), categoria.getGenero());
+                return criarInscricao(categoria, jaInscritoAntes.get());
+            }
+        }
+
+        String box = dto.nomeBox() != null ? dto.nomeBox().trim() : "";
+        if (box.length() > 100) {
+            throw new RegraNegocioException("O nome do box deve ter até 100 caracteres.");
+        }
+
+        Atleta atleta = new Atleta();
+        atleta.setNomeCompleto(nome);
+        atleta.setCpf(cpf);
+        atleta.setGenero(generoParaCategoria(dto.genero(), categoria));
+        atleta.setNomeBox(box.isEmpty() ? "Sem Box" : box);
+        atleta.setPerfil(Atleta.PERFIL_SEM_CADASTRO);
+        return criarInscricao(categoria, atletaRepository.save(atleta));
+    }
+
+    /** Gênero informado pelo organizador ou, se não informado, o da categoria (obrigatório em categorias mistas). */
+    private static String generoParaCategoria(String generoInformado, CategoriaEvento categoria) {
+        String genero = generoInformado != null ? generoInformado.trim().toUpperCase() : "";
+        if (genero.isEmpty()) {
+            String daCategoria = categoria.getGenero() != null ? categoria.getGenero().toUpperCase() : "";
+            if (daCategoria.contains("MASC")) return "MASCULINO";
+            if (daCategoria.contains("FEM")) return "FEMININO";
+            throw new RegraNegocioException("Informe o gênero do atleta: a categoria é mista.");
+        }
+        if (!Set.of("MASCULINO", "FEMININO", "OUTRO").contains(genero)) {
+            throw new RegraNegocioException("Gênero inválido.");
+        }
+        RegrasElegibilidade.validarGenero(genero, categoria.getGenero());
+        return genero;
     }
 
     private Atleta obterAtletaCadastrado(Long atletaId, CategoriaEvento categoria) {

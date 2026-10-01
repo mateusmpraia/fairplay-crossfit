@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { encerrarSessao } from '../api';
-import { dataIsoParaBr, dataIsoParaMesAno } from '../utils/formatacao';
+import api, { encerrarSessao, acessoPeloAdmin, voltarAoAdmin } from '../api';
+import { dataIsoParaBr } from '../utils/formatacao';
 import Modal from '../components/Modal';
 import Alerta from '../components/Alerta';
 import ModalTrocarSenha from '../components/ModalTrocarSenha';
@@ -117,7 +117,15 @@ export default function DashboardAtleta() {
     }
   };
 
+  // Administrador usando a conta do atleta: "sair" volta ao gerenciamento de usuários, com a sessão de admin
+  const peloAdmin = acessoPeloAdmin();
+
   const handleLogout = () => {
+    if (peloAdmin) {
+      voltarAoAdmin();
+      navigate('/admin/usuarios');
+      return;
+    }
     encerrarSessao();
     navigate('/login');
   };
@@ -134,13 +142,23 @@ export default function DashboardAtleta() {
     return (
       <div style={styles.loadingContainer}>
         <h2 style={{ color: '#ff4444' }}>{erro || 'Atleta não encontrado.'}</h2>
-        <button onClick={() => navigate('/login')} className="botao botao-secundario">Voltar ao Login</button>
+        <button onClick={handleLogout} className="botao botao-secundario">{peloAdmin ? 'Voltar ao admin' : 'Voltar ao Login'}</button>
       </div>
     );
   }
 
   return (
     <div style={styles.container}>
+      {peloAdmin && (
+        <div style={styles.faixaAdmin} role="status">
+          <span>
+            🛡️ Você está usando a conta de <strong>{dashboardData.nomeCompleto}</strong> como administrador.
+            Tudo o que fizer aqui é feito em nome do atleta.
+          </span>
+          <button onClick={handleLogout} style={styles.btnVoltarAdmin}>← Voltar ao gerenciamento</button>
+        </div>
+      )}
+
       <header className="barra-topo">
         <div style={styles.navLeft}>
           <span style={styles.brand}>FAIRPLAY</span>
@@ -150,7 +168,7 @@ export default function DashboardAtleta() {
         <div className="barra-topo-acoes">
           <button onClick={abrirModalEditar} style={styles.btnEditarPerfil}>✏️ Editar Perfil</button>
           <button onClick={() => setModalSenhaAberto(true)} className="botao botao-secundario">🔑 Trocar senha</button>
-          <button onClick={handleLogout} className="botao botao-secundario">Sair</button>
+          <button onClick={handleLogout} className="botao botao-secundario">{peloAdmin ? 'Voltar ao admin' : 'Sair'}</button>
         </div>
       </header>
 
@@ -251,7 +269,6 @@ export default function DashboardAtleta() {
                 <thead>
                   <tr style={styles.thRow}>
                     <th style={styles.th}>NOME DO CAMPEONATO</th>
-                    <th style={styles.th}>DATA (MÊS/ANO)</th>
                     <th style={styles.th}>CATEGORIA DISPUTADA</th>
                     <th style={styles.th}>COLOCAÇÃO FINAL</th>
                   </tr>
@@ -264,9 +281,6 @@ export default function DashboardAtleta() {
                         <td style={{ ...styles.td, fontWeight: '700', color: '#ffffff' }}>
                           {item.nomeCampeonato}
                           <small style={{ ...styles.detalhe, color: origem.cor }}>{origem.texto}</small>
-                        </td>
-                        <td style={{ ...styles.td, color: '#a0aec0' }}>
-                          📅 {item.dataCampeonato ? dataIsoParaMesAno(item.dataCampeonato) : 'Histórico Consolidado'}
                         </td>
                         <td style={styles.td}>
                           <span style={styles.categoryBadge}>{item.categoria}</span>
@@ -337,6 +351,29 @@ const styles = {
     alignItems: 'center',
     backgroundColor: '#0a0c0e',
     gap: '16px',
+  },
+  faixaAdmin: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '10px',
+    padding: '10px 36px',
+    backgroundColor: 'rgba(255, 68, 68, 0.12)',
+    borderBottom: '1px solid rgba(255, 68, 68, 0.4)',
+    color: '#ff9b9b',
+    fontSize: '0.85rem',
+  },
+  btnVoltarAdmin: {
+    backgroundColor: 'transparent',
+    border: '1px solid rgba(255, 68, 68, 0.5)',
+    color: '#ff9b9b',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+    fontWeight: '700',
+    whiteSpace: 'nowrap',
   },
   navLeft: {
     display: 'flex',

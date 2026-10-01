@@ -1,8 +1,12 @@
 package br.com.uff.fairplay.controller;
 
 import br.com.uff.fairplay.dto.UsuarioAdminDTO;
+import br.com.uff.fairplay.model.Atleta;
 import br.com.uff.fairplay.repository.AtletaRepository;
+import br.com.uff.fairplay.repository.HistoricoAtletaRepository;
+import br.com.uff.fairplay.repository.HistoricoAtletaRepository.TotalDeVinculos;
 import br.com.uff.fairplay.security.SessaoService;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -14,29 +18,34 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin/usuarios")
 public class AdminUsuarioController {
 
     private static final String PERFIL_ADMIN = "MASTER_ADMIN";
+    private static final Logger LOG = LoggerFactory.getLogger(AdminUsuarioController.class);
 
     private final AtletaRepository atletaRepository;
+    private final HistoricoAtletaRepository historicoAtletaRepository;
     private final SessaoService sessaoService;
     private final String usuarioAdmin;
     private final String senhaAdmin;
 
     public AdminUsuarioController(AtletaRepository atletaRepository,
+                                  HistoricoAtletaRepository historicoAtletaRepository,
                                   SessaoService sessaoService,
                                   @Value("${fairplay.admin.usuario}") String usuarioAdmin,
                                   @Value("${fairplay.admin.senha}") String senhaAdmin) {
         this.atletaRepository = atletaRepository;
+        this.historicoAtletaRepository = historicoAtletaRepository;
         this.sessaoService = sessaoService;
         this.usuarioAdmin = usuarioAdmin;
         this.senhaAdmin = senhaAdmin;
 
         if ("master".equals(senhaAdmin)) {
-            LoggerFactory.getLogger(AdminUsuarioController.class).warn(
+            LOG.warn(
                     "Administrador usando a senha padrão \"master\". Defina FAIRPLAY_ADMIN_SENHA antes de colocar o sistema no ar.");
         }
     }
@@ -56,8 +65,12 @@ public class AdminUsuarioController {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Credenciais administrativas inválidas.");
     }
 
+    /** Todos os usuários, com quantas competições do histórico importado cada um tem vinculadas. */
     @GetMapping
     public ResponseEntity<List<UsuarioAdminDTO>> listarUsuarios() {
+        Map<Long, Long> historicosPorAtleta = historicoAtletaRepository.contarVinculosPorAtleta().stream()
+                .collect(Collectors.toMap(TotalDeVinculos::getAtletaId, TotalDeVinculos::getTotal));
+
         List<UsuarioAdminDTO> usuarios = atletaRepository.findAll().stream()
                 .map(a -> new UsuarioAdminDTO(
                         a.getId(),
@@ -69,10 +82,34 @@ public class AdminUsuarioController {
                         a.getCidade(),
                         a.getEstado(),
                         a.getPerfil(),
-                        a.getDataNascimento()
+                        a.getDataNascimento(),
+                        historicosPorAtleta.getOrDefault(a.getId(), 0L)
                 ))
                 .toList();
         return ResponseEntity.ok(usuarios);
+    }
+
+    /**
+     * Abre uma sessão de atleta para o administrador usar o sistema como esse atleta (editar perfil, vincular
+     * histórico etc.). Só para contas de atleta com cadastro; o acesso fica registrado no log.
+     */
+    @PostMapping("/{id}/acessar")
+    public ResponseEntity<?> acessarComoAtleta(@PathVariable Long id) {
+        Atleta atleta = atletaRepository.findById(id).orElse(null);
+        if (atleta == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!Atleta.PERFIL_ATLETA.equals(atleta.getPerfil())) {
+            return ResponseEntity.badRequest().body("Só é possível acessar o painel de atletas com cadastro.");
+        }
+
+        LOG.info("Administrador acessou a conta do atleta #{} ({})", atleta.getId(), atleta.getNomeCompleto());
+        return ResponseEntity.ok(Map.of(
+                "token", sessaoService.criar(atleta.getId(), Atleta.PERFIL_ATLETA),
+                "id", atleta.getId(),
+                "nome", atleta.getNomeCompleto(),
+                "perfil", Atleta.PERFIL_ATLETA
+        ));
     }
 
     /**

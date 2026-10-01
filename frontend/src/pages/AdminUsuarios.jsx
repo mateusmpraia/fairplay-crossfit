@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { encerrarSessao } from '../api';
+import api, { encerrarSessao, entrarComoAtleta, mensagemDeErro } from '../api';
 import { estiloFeedback } from '../tema';
 import ModalConfirmacao from '../components/ModalConfirmacao';
 import PedidosDesvinculo from '../components/PedidosDesvinculo';
@@ -22,6 +22,17 @@ export default function AdminUsuarios() {
       .catch(() => setMensagem({ tipo: 'erro', texto: 'Erro ao carregar lista de usuários.' }))
       .finally(() => setCarregando(false));
   }, []);
+
+  /** Abre o painel do atleta como se fosse ele; a sessão de admin fica guardada para voltar depois. */
+  const handleAcessarPainel = async (usuario) => {
+    try {
+      const { data } = await api.post(`/admin/usuarios/${usuario.id}/acessar`);
+      entrarComoAtleta(data);
+      navigate('/atleta/home');
+    } catch (err) {
+      setMensagem({ tipo: 'erro', texto: mensagemDeErro(err, 'Não foi possível acessar o painel deste atleta.') });
+    }
+  };
 
   const handleExcluir = async () => {
     const usuario = usuarioParaExcluir;
@@ -122,6 +133,9 @@ export default function AdminUsuarios() {
                     <th style={styles.th}>CPF</th>
                     <th style={styles.th}>BOX / CIDADE</th>
                     <th style={styles.th}>PERFIL</th>
+                    <th style={{ ...styles.th, textAlign: 'center' }} title="Competições do histórico importado vinculadas ao atleta">
+                      HISTÓRICO
+                    </th>
                     <th style={{ ...styles.th, textAlign: 'center' }}>AÇÃO</th>
                   </tr>
                 </thead>
@@ -152,13 +166,33 @@ export default function AdminUsuarios() {
                         </span>
                       </td>
                       <td style={{ ...styles.td, textAlign: 'center' }}>
-                        <button
-                          onClick={() => setUsuarioParaExcluir(u)}
-                          style={styles.btnExcluir}
-                          title="Excluir usuário"
-                        >
-                          Excluir
-                        </button>
+                        {u.perfil === 'ORGANIZADOR' ? (
+                          <span style={{ color: '#4a5568' }}>—</span>
+                        ) : (
+                          <span style={{ color: u.totalHistoricos > 0 ? '#ffd700' : '#718096', fontWeight: '700' }}>
+                            {u.totalHistoricos} {u.totalHistoricos === 1 ? 'competição' : 'competições'}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...styles.td, textAlign: 'center' }}>
+                        <div style={styles.acoes}>
+                          {u.perfil === 'ATLETA' && (
+                            <button
+                              onClick={() => handleAcessarPainel(u)}
+                              style={styles.btnAcessar}
+                              title="Usar o sistema como este atleta"
+                            >
+                              Acessar painel
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setUsuarioParaExcluir(u)}
+                            style={styles.btnExcluir}
+                            title="Excluir usuário"
+                          >
+                            Excluir
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -337,6 +371,22 @@ const styles = {
     fontSize: '0.72rem',
     fontWeight: '700',
     letterSpacing: '0.5px',
+  },
+  acoes: {
+    display: 'flex',
+    gap: '8px',
+    justifyContent: 'center',
+  },
+  btnAcessar: {
+    backgroundColor: 'rgba(0, 255, 136, 0.12)',
+    color: '#00ff88',
+    border: '1px solid rgba(0, 255, 136, 0.3)',
+    borderRadius: '6px',
+    padding: '6px 12px',
+    fontSize: '0.75rem',
+    fontWeight: '700',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
   btnExcluir: {
     backgroundColor: 'rgba(255, 68, 68, 0.15)',

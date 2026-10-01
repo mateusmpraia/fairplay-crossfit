@@ -37,6 +37,10 @@ public class InscricaoEvento {
     @Column(name = "motivo_irregularidade", columnDefinition = "TEXT")
     private String motivoIrregularidade;
 
+    /** Quantas competições do histórico a auditoria considerou (0 = atleta sem histórico no sistema). */
+    @Column(name = "historico_considerado")
+    private Integer historicoConsiderado;
+
     @Column(name = "data_inscricao")
     private LocalDateTime dataInscricao;
 

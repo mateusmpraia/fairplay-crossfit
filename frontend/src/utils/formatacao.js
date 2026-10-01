@@ -68,10 +68,3 @@ export function dataIsoParaBr(dataIso) {
   if (partes.length !== 3) return dataIso;
   return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
-
-/** AAAA-MM-DD → Mmm/AAAA (ex.: Mar/2025). */
-export function dataIsoParaMesAno(dataIso) {
-  const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-  const [ano, mes] = dataIso.split('-');
-  return `${meses[parseInt(mes, 10) - 1]}/${ano}`;
-}

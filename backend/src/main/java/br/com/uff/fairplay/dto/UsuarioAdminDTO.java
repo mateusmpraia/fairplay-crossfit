@@ -12,5 +12,6 @@ public record UsuarioAdminDTO(
     String cidade,
     String estado,
     String perfil,
-    LocalDate dataNascimento
+    LocalDate dataNascimento,
+    long totalHistoricos   // competições do histórico importado vinculadas ao atleta
 ) {}

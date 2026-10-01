@@ -16,8 +16,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RegrasElegibilidadeTest {
 
-    private static final CriteriosEvento TODOS_LIGADOS = new CriteriosEvento(true, true, true);
-    private static final CriteriosEvento TODOS_DESLIGADOS = new CriteriosEvento(false, false, false);
+    private static final CriteriosEvento TODOS_LIGADOS = new CriteriosEvento(true, true, true, true);
+    private static final CriteriosEvento TODOS_DESLIGADOS = new CriteriosEvento(false, false, false, false);
+    private static final CriteriosEvento SO_NAO_DESCE = new CriteriosEvento(false, false, false, true);
 
     private static Participacao p(br.com.uff.fairplay.model.CategoriaCompeticao categoria, int colocacao) {
         return new Participacao(categoria, colocacao);
@@ -120,16 +121,16 @@ class RegrasElegibilidadeTest {
         @Test
         void tresPodiosNaMesmaCategoria() {
             List<Participacao> historico = List.of(p(RX, 2), p(RX, 3), p(RX, 2));
-            assertThat(auditar(RX, new CriteriosEvento(false, true, false), historico).status())
+            assertThat(auditar(RX, new CriteriosEvento(false, true, false, false), historico).status())
                     .isEqualTo(RegrasElegibilidade.IRREGULAR);
-            assertThat(auditar(RX, new CriteriosEvento(false, true, false), historico.subList(0, 2)).status())
+            assertThat(auditar(RX, new CriteriosEvento(false, true, false, false), historico.subList(0, 2)).status())
                     .isEqualTo(RegrasElegibilidade.REGULAR);
         }
 
         @Test
         void tresParticipacoesNaMesmaCategoria() {
             List<Participacao> historico = List.of(p(SCALE, 10), p(SCALE, 12), p(SCALE, 8));
-            ResultadoAuditoria r = auditar(SCALE, new CriteriosEvento(false, false, true), historico);
+            ResultadoAuditoria r = auditar(SCALE, new CriteriosEvento(false, false, true, false), historico);
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
             assertThat(r.motivo()).contains("3 vezes");
         }
@@ -152,6 +153,37 @@ class RegrasElegibilidadeTest {
         @Test
         void recomendaAMenorCategoriaDisponivelAcima() {
             ResultadoAuditoria r = RegrasElegibilidade.auditar(SCALE, TODOS_LIGADOS, List.of(p(SCALE, 1)), EnumSet.of(SCALE, RX, ELITE));
+            assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
+            assertThat(r.categoriaRecomendada()).isEqualTo("RX");
+        }
+
+        @Test
+        void quemCompetiuNoIntermediarioNaoPodeIrParaOScale() {
+            ResultadoAuditoria r = auditar(SCALE, SO_NAO_DESCE, List.of(p(INTERMEDIARIO, 9)));
+            assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
+            assertThat(r.categoriaRecomendada()).isEqualTo("Intermediário");
+            assertThat(r.motivo()).contains("Já competiu na categoria Intermediário");
+        }
+
+        @Test
+        void quemCompetiuNoEliteVaiParaORxSeOEventoNaoTemElite() {
+            ResultadoAuditoria noRx = RegrasElegibilidade.auditar(RX, SO_NAO_DESCE, List.of(p(ELITE, 20)), EnumSet.of(SCALE, RX));
+            assertThat(noRx.status()).isEqualTo(RegrasElegibilidade.REGULAR);
+
+            ResultadoAuditoria noScale = RegrasElegibilidade.auditar(SCALE, SO_NAO_DESCE, List.of(p(ELITE, 20)), EnumSet.of(SCALE, INTERMEDIARIO, RX));
+            assertThat(noScale.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
+            assertThat(noScale.categoriaRecomendada()).isEqualTo("RX");
+        }
+
+        @Test
+        void naoDesceIgnoraMasterECategoriasAbaixo() {
+            assertThat(auditar(SCALE, SO_NAO_DESCE, List.of(p(MASTER, 3))).status()).isEqualTo(RegrasElegibilidade.REGULAR);
+            assertThat(auditar(RX, SO_NAO_DESCE, List.of(p(SCALE, 1), p(RX, 12))).status()).isEqualTo(RegrasElegibilidade.REGULAR);
+        }
+
+        @Test
+        void comVariasInfracoesRecomendaODestinoMaisAlto() {
+            ResultadoAuditoria r = auditar(SCALE, TODOS_LIGADOS, List.of(p(SCALE, 1), p(RX, 10)));
             assertThat(r.status()).isEqualTo(RegrasElegibilidade.IRREGULAR);
             assertThat(r.categoriaRecomendada()).isEqualTo("RX");
         }

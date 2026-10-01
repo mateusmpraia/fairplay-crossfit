@@ -118,7 +118,7 @@ O histórico de competições (`historico_atletas`) é importado pelos scripts P
 
 | Tabela | Conteúdo |
 |---|---|
-| `atletas` | Contas de atletas e organizadores, e atletas pendentes do histórico (perfil `HISTORICO`) |
+| `atletas` | Contas de atletas e organizadores, atletas pendentes do histórico (perfil `HISTORICO`) e atletas inscritos sem cadastro (perfil `SEM_CADASTRO`, assumidos pela conta criada com o mesmo CPF) |
 | `historico_atletas` | Resultados de competições importados |
 | `atletas_historico_vinculos` | Quais registros do histórico pertencem a cada atleta (escolhidos competição por competição) |
 | `atletas_historico_recusas` | Registros do histórico que o atleta declarou não serem dele (a auditoria os ignora) |
@@ -138,6 +138,9 @@ A escada de promoção é **Iniciante → Scale → Intermediário → RX → El
 - **Auditoria da inscrição** (critérios ligados pelo organizador em cada evento):
   campeão na categoria ou acima, 3 pódios na categoria, ou 3 participações na categoria → inscrição **irregular**,
   com recomendação da menor categoria acima que o evento oferece ao atleta.
+- **Não pode descer** (quarto critério, ligado por padrão nos eventos novos): quem já competiu numa categoria
+  acima da inscrita fica **irregular**, com recomendação da categoria mais alta que o evento oferece até a que ele
+  já disputou (quem competiu no Elite pode ir para o RX se o evento não tiver Elite).
 - **Só se sobe para categoria que existe:** se o evento não tem categoria acima da inscrita com o mesmo formato
   e gênero compatível (ex.: não tem Elite feminina), a inscrição fica **regular** e o diagnóstico explica o motivo.
 - **Reauditoria automática:** a auditoria fica gravada na inscrição e é refeita quando o histórico do atleta muda

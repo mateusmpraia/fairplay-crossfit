@@ -11,10 +11,11 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
 });
 
-// Envia o token da sessão em todas as requisições
+// Envia o token da sessão em todas as requisições (exceto as que já informam outro, como o logout do
+// atleta quando o administrador volta à própria sessão)
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token && !config.headers.Authorization) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -53,6 +54,32 @@ export function encerrarSessao() {
     api.post('/sessao/logout', null, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
   }
   localStorage.clear();
+}
+
+/**
+ * O administrador passa a usar o sistema como o atleta: a sessão de admin fica guardada à parte
+ * e a sessão do atleta (aberta pelo backend) passa a ser a atual.
+ */
+export function entrarComoAtleta(sessaoAtleta) {
+  localStorage.setItem('tokenAdmin', localStorage.getItem('token'));
+  localStorage.removeItem('usuarioNome');
+  iniciarSessao(sessaoAtleta);
+}
+
+/** Se a sessão atual é de um administrador usando a conta de um atleta. */
+export function acessoPeloAdmin() {
+  return Boolean(localStorage.getItem('tokenAdmin'));
+}
+
+/** Encerra a sessão do atleta e devolve o administrador à sessão dele. */
+export function voltarAoAdmin() {
+  const tokenAtleta = localStorage.getItem('token');
+  const tokenAdmin = localStorage.getItem('tokenAdmin');
+  if (tokenAtleta) {
+    api.post('/sessao/logout', null, { headers: { Authorization: `Bearer ${tokenAtleta}` } }).catch(() => {});
+  }
+  localStorage.clear();
+  if (tokenAdmin) iniciarSessao({ token: tokenAdmin, perfil: 'MASTER_ADMIN' });
 }
 
 export default api;

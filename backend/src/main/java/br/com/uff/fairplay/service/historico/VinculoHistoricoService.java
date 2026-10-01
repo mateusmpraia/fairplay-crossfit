@@ -121,11 +121,13 @@ public class VinculoHistoricoService {
     }
 
     /**
-     * Passa as inscrições do atleta pendente para a conta e apaga o pendente (os vínculos dele somem junto;
-     * a conta fica só com as competições que a pessoa marcou). Se os dois estavam inscritos na mesma
-     * categoria, a inscrição do pendente é descartada.
+     * Passa as inscrições do atleta pendente (do histórico ou sem cadastro) para a conta e apaga o pendente
+     * (os vínculos dele somem junto; a conta fica só com as competições que a pessoa marcou). Se os dois
+     * estavam inscritos na mesma categoria, a inscrição do pendente é descartada. Quem chama deve reauditar
+     * as inscrições da conta depois.
      */
-    private void incorporarPendente(Long pendenteId, Atleta atleta) {
+    @Transactional
+    public void incorporarPendente(Long pendenteId, Atleta atleta) {
         List<InscricaoEvento> inscricoes = inscricaoEventoRepository.findByAtletaId(pendenteId);
         for (InscricaoEvento inscricao : inscricoes) {
             if (inscricaoEventoRepository.existsByCategoriaEventoIdAndAtletaId(inscricao.getCategoriaEvento().getId(), atleta.getId())) {

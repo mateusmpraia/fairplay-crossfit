@@ -11,3 +11,5 @@ databaseChangeLog:
       file: db/changelog/004-vinculos-por-competicao.sql
   - include:
       file: db/changelog/005-reauditoria-automatica.sql
+  - include:
+      file: db/changelog/006-nao-desce-e-sem-cadastro.sql

@@ -12,5 +12,6 @@ public record CriarEventoDTO(
     boolean regraCampeaoSobe,
     boolean regraTresPodiosSobe,
     boolean regraTresParticipacoesSobe,
+    Boolean regraNaoDesce,
     List<CriarCategoriaDTO> categorias
 ) {}

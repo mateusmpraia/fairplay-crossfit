@@ -45,6 +45,10 @@ public class Evento {
     @Column(name = "regra_tres_participacoes_sobe")
     private boolean regraTresParticipacoesSobe;
 
+    /** Quem já competiu numa categoria acima não pode se inscrever numa abaixo. */
+    @Column(name = "regra_nao_desce")
+    private boolean regraNaoDesce;
+
     @OneToMany(mappedBy = "evento", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<CategoriaEvento> categorias = new ArrayList<>();
 }

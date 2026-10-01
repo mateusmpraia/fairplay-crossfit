@@ -8,6 +8,7 @@ import Alerta from '../components/Alerta';
 import ModalConfirmacao from '../components/ModalConfirmacao';
 import ModalTrocarSenha from '../components/ModalTrocarSenha';
 import ImportacaoCpfs from '../components/ImportacaoCpfs';
+import ModalInscreverSemCadastro from '../components/ModalInscreverSemCadastro';
 
 const FORMATOS = ['Individual', 'Dupla', 'Trio', 'Time'];
 const GENEROS = ['Masculino', 'Feminino', 'Misto'];
@@ -23,6 +24,7 @@ const EVENTO_VAZIO = {
   regraCampeaoSobe: true,
   regraTresPodiosSobe: true,
   regraTresParticipacoesSobe: false,
+  regraNaoDesce: true,
   categorias: []
 };
 
@@ -31,7 +33,19 @@ const REGRAS = [
   { campo: 'regraCampeaoSobe', rotuloCurto: 'Já foi campeão', rotuloLongo: 'Já foi campeão na categoria anterior' },
   { campo: 'regraTresPodiosSobe', rotuloCurto: '3 pódios na categoria', rotuloLongo: 'Já conquistou 3 pódios na categoria anterior' },
   { campo: 'regraTresParticipacoesSobe', rotuloCurto: '3 participações', rotuloLongo: 'Já participou 3x da mesma categoria' },
+  { campo: 'regraNaoDesce', rotuloCurto: 'Não pode descer', rotuloLongo: 'Já competiu numa categoria acima (não pode descer)' },
 ];
+
+/** Situação do atleta no sistema: com conta, só no histórico importado ou inscrito sem cadastro pelo organizador. */
+const ORIGEM_ATLETA = {
+  ATLETA: { texto: 'Cadastrado', cor: '#00ff88' },
+  HISTORICO: { texto: 'Só no histórico (sem cadastro)', cor: '#ffd700' },
+  SEM_CADASTRO: { texto: 'Sem cadastro', cor: '#a0aec0' },
+};
+
+/** "3 competições no histórico" ou "Sem histórico no sistema". */
+const descreverHistorico = (total) =>
+  total > 0 ? `📊 ${total} competição(ões) no histórico` : 'Sem histórico no sistema';
 
 const SEM_FEEDBACK = { tipo: '', texto: '' };
 
@@ -52,6 +66,23 @@ const cidadeUf = (pessoa) => (pessoa?.cidade ? `${pessoa.cidade}/${pessoa.estado
 
 function Opcoes({ valores }) {
   return valores.map((valor) => <option key={valor} value={valor}>{valor}</option>);
+}
+
+/**
+ * Situação do atleta para o organizador: se tem conta no FairPlay e quantas competições do histórico
+ * a auditoria considera ({@code totalHistorico} nulo = ainda não calculado, nas inscrições antigas).
+ */
+function SituacaoAtleta({ perfil, totalHistorico }) {
+  const origem = ORIGEM_ATLETA[perfil];
+  return (
+    <span style={styles.situacaoAtleta}>
+      {origem && <span style={{ color: origem.cor }}>{origem.texto}</span>}
+      {origem && totalHistorico != null && ' • '}
+      {totalHistorico != null && (
+        <span style={{ color: totalHistorico > 0 ? '#ffd700' : '#ff9f43' }}>{descreverHistorico(totalHistorico)}</span>
+      )}
+    </span>
+  );
 }
 
 export default function DashboardOrganizador() {
@@ -75,6 +106,8 @@ export default function DashboardOrganizador() {
   const [modalAddCatAberto, setModalAddCatAberto] = useState(false);
   const [novaCatExistente, setNovaCatExistente] = useState(CATEGORIA_PADRAO);
   const [modalImportarAberto, setModalImportarAberto] = useState(false);
+  // Inscrição de quem não tem cadastro nem histórico: guarda o termo digitado na busca (null = fechado)
+  const [semCadastroTermo, setSemCadastroTermo] = useState(null);
   const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
 
   // Busca e inscrição de atletas
@@ -254,13 +287,26 @@ export default function DashboardOrganizador() {
       if (lista.length > 0) {
         handleInscreverAtleta(escolherAtleta(lista, termoBusca));
       } else {
-        setFeedbackInscricao({ tipo: 'erro', texto: 'Nenhum atleta encontrado com este nome ou CPF.' });
+        // Ninguém com esse nome ou CPF: oferece a inscrição sem cadastro
+        setSemCadastroTermo(termoBusca);
+        limparBusca();
       }
     } catch {
       setFeedbackInscricao({ tipo: 'erro', texto: 'Erro ao buscar atleta para inscrição.' });
     } finally {
       setInscrevendo(false);
     }
+  };
+
+  const abrirInscricaoSemCadastro = () => {
+    setSemCadastroTermo(termoBusca);
+    limparBusca();
+  };
+
+  const handleInscritoSemCadastro = (inscricao) => {
+    setSemCadastroTermo(null);
+    setInscritos((prev) => [inscricao, ...prev.filter((ins) => ins.id !== inscricao.id)]);
+    setFeedbackInscricao({ tipo: 'sucesso', texto: `Atleta ${inscricao.atleta.nomeCompleto} inscrito sem cadastro.` });
   };
 
   /** Acrescenta à tabela os atletas inscritos pela importação de planilha. */
@@ -340,6 +386,8 @@ export default function DashboardOrganizador() {
       CPF: ins.atleta?.cpf || '',
       'Box / CT': ins.atleta?.nomeBox || '',
       'Cidade/UF': cidadeUf(ins.atleta),
+      Cadastro: ORIGEM_ATLETA[ins.atleta?.perfil]?.texto || '',
+      'Competições no histórico': ins.historicoConsiderado ?? '',
       'Status da auditoria': ins.statusElegibilidade === 'REGULAR' ? 'Regular' : 'Irregular',
       'Categoria recomendada': ins.categoriaRecomendada || '',
       Diagnóstico: ins.motivoIrregularidade || '',
@@ -349,7 +397,7 @@ export default function DashboardOrganizador() {
       `${eventoSelecionado.nome} - ${categoriaSelecionada.formato} ${categoriaSelecionada.genero} ${categoriaSelecionada.nivel}`,
       'Inscritos',
       linhas,
-      [30, 16, 24, 18, 18, 20, 60, 10]
+      [30, 16, 24, 18, 26, 14, 18, 20, 60, 10]
     );
   };
 
@@ -363,6 +411,7 @@ export default function DashboardOrganizador() {
       regraCampeaoSobe: eventoSelecionado.regraCampeaoSobe,
       regraTresPodiosSobe: eventoSelecionado.regraTresPodiosSobe,
       regraTresParticipacoesSobe: eventoSelecionado.regraTresParticipacoesSobe,
+      regraNaoDesce: eventoSelecionado.regraNaoDesce,
       [campo]: !eventoSelecionado[campo],
     };
 
@@ -683,7 +732,7 @@ export default function DashboardOrganizador() {
                         style={styles.inputBusca}
                       />
 
-                      {sugestoesVisiveis.length > 0 && (
+                      {buscaAtiva && (
                         <div style={styles.dropdownSugestoes}>
                           {sugestoesVisiveis.map((a) => (
                             <div key={a.id} onClick={() => handleInscreverAtleta(a)} style={styles.dropdownItem}>
@@ -695,18 +744,24 @@ export default function DashboardOrganizador() {
                                       (CPF: {formatarCpf(a.cpf)})
                                     </span>
                                   )}
-                                  <span style={{ fontSize: '0.75rem', color: '#ffd700', marginLeft: '8px', fontWeight: 'bold' }}>
-                                    📊 {a.totalHistoricos || 0} histórico(s)
-                                  </span>
                                 </span>
                                 <span style={styles.dropdownBox}>
                                   Box: {a.nomeBox || 'Sem Box'}{cidadeUf(a) ? ` • ${cidadeUf(a)}` : ''}
-                                  {a.perfil === 'HISTORICO' && ' • só no histórico (sem cadastro)'}
                                 </span>
+                                <SituacaoAtleta perfil={a.perfil} totalHistorico={a.totalHistoricos || 0} />
                               </div>
                               <span style={styles.badgeInscreverDireto}>+ Inscrever</span>
                             </div>
                           ))}
+                          <div onClick={abrirInscricaoSemCadastro} style={{ ...styles.dropdownItem, borderBottom: 'none' }}>
+                            <div>
+                              <span style={styles.dropdownNome}>Não encontrou o atleta?</span>
+                              <span style={styles.dropdownBox}>Inscreva quem ainda não tem cadastro nem histórico no FairPlay.</span>
+                            </div>
+                            <span style={{ ...styles.badgeInscreverDireto, backgroundColor: 'transparent', border: '1px dashed #00bfff', color: '#00bfff' }}>
+                              + Sem cadastro
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -753,6 +808,7 @@ export default function DashboardOrganizador() {
                               <tr key={ins.id} style={ins.auditoriaAlteradaEm ? { ...styles.tr, ...styles.trAlterada } : styles.tr}>
                                 <td style={{ ...styles.td, fontWeight: '700', color: '#ffffff' }}>
                                   {ins.atleta?.nomeCompleto}
+                                  <SituacaoAtleta perfil={ins.atleta?.perfil} totalHistorico={ins.historicoConsiderado} />
                                 </td>
                                 <td style={styles.td}>
                                   {ins.atleta?.nomeBox || 'N/D'}{' '}
@@ -876,6 +932,15 @@ export default function DashboardOrganizador() {
         >
           Tem certeza de que deseja remover o atleta <strong>{inscricaoParaExcluir.atleta?.nomeCompleto}</strong> desta categoria?
         </ModalConfirmacao>
+      )}
+
+      {semCadastroTermo !== null && categoriaSelecionada && (
+        <ModalInscreverSemCadastro
+          categoria={categoriaSelecionada}
+          termoInicial={semCadastroTermo}
+          onInscrito={handleInscritoSemCadastro}
+          onFechar={() => setSemCadastroTermo(null)}
+        />
       )}
 
       {modalImportarAberto && categoriaSelecionada && (
@@ -1101,6 +1166,7 @@ const styles = {
   dropdownSugestoes: { position: 'absolute', top: '48px', left: 0, right: 0, backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '8px', zIndex: 99, maxHeight: '240px', overflowY: 'auto', boxShadow: '0 12px 28px rgba(0,0,0,0.8)' },
   dropdownItem: { padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #21262d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' },
   dropdownNome: { display: 'block', color: '#ffffff', fontWeight: 'bold', fontSize: '0.88rem' },
+  situacaoAtleta: { display: 'block', fontSize: '0.74rem', fontWeight: '600', marginTop: '4px' },
   dropdownBox: { display: 'block', color: '#8b949e', fontSize: '0.78rem', marginTop: '2px' },
   badgeInscreverDireto: { fontSize: '0.75rem', backgroundColor: '#238636', color: '#ffffff', padding: '4px 10px', borderRadius: '6px', fontWeight: 'bold', whiteSpace: 'nowrap' },
   tabela: { width: '100%', borderCollapse: 'collapse', textAlign: 'left' },

@@ -9,6 +9,7 @@ import br.com.uff.fairplay.repository.InscricaoEventoRepository;
 import br.com.uff.fairplay.service.RegrasElegibilidade.CriteriosEvento;
 import br.com.uff.fairplay.service.RegrasElegibilidade.ResultadoAuditoria;
 import br.com.uff.fairplay.service.historico.HistoricoCompeticaoFactory;
+import br.com.uff.fairplay.service.historico.HistoricoDoAtleta;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,13 +46,18 @@ public class AuditoriaInscricaoService {
         this.historicoFactory = historicoFactory;
     }
 
+    /** Resultado da auditoria e quantas competições do histórico ela considerou. */
+    private record Auditoria(ResultadoAuditoria resultado, int competicoesConsideradas) {}
+
     /** Audita a inscrição do atleta na categoria com o histórico atual dele (sem o próprio evento). */
-    public ResultadoAuditoria auditar(Atleta atleta, CategoriaEvento categoria) {
+    private Auditoria auditar(Atleta atleta, CategoriaEvento categoria) {
         Evento evento = categoria.getEvento();
-        CriteriosEvento criterios = new CriteriosEvento(
-                evento.isRegraCampeaoSobe(), evento.isRegraTresPodiosSobe(), evento.isRegraTresParticipacoesSobe());
-        return RegrasElegibilidade.auditar(categoria.getNivel(), criterios,
-                historicoFactory.paraAuditoria(atleta, evento).participacoes(), niveisDisponiveis(atleta, categoria));
+        CriteriosEvento criterios = new CriteriosEvento(evento.isRegraCampeaoSobe(), evento.isRegraTresPodiosSobe(),
+                evento.isRegraTresParticipacoesSobe(), evento.isRegraNaoDesce());
+        HistoricoDoAtleta historico = historicoFactory.paraAuditoria(atleta, evento);
+        ResultadoAuditoria resultado = RegrasElegibilidade.auditar(categoria.getNivel(), criterios,
+                historico.participacoes(), niveisDisponiveis(atleta, categoria));
+        return new Auditoria(resultado, historico.registros().size());
     }
 
     /**
@@ -120,9 +126,10 @@ public class AuditoriaInscricaoService {
         inscricao.setAuditoriaAlteradaEm(null);
     }
 
-    private static void gravar(InscricaoEvento inscricao, ResultadoAuditoria auditoria) {
-        inscricao.setStatusElegibilidade(auditoria.status());
-        inscricao.setCategoriaRecomendada(auditoria.categoriaRecomendada());
-        inscricao.setMotivoIrregularidade(auditoria.motivo());
+    private static void gravar(InscricaoEvento inscricao, Auditoria auditoria) {
+        inscricao.setStatusElegibilidade(auditoria.resultado().status());
+        inscricao.setCategoriaRecomendada(auditoria.resultado().categoriaRecomendada());
+        inscricao.setMotivoIrregularidade(auditoria.resultado().motivo());
+        inscricao.setHistoricoConsiderado(auditoria.competicoesConsideradas());
     }
 }
