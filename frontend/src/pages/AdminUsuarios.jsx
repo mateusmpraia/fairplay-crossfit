@@ -5,7 +5,38 @@ import { estiloFeedback } from '../tema';
 import ModalConfirmacao from '../components/ModalConfirmacao';
 import PedidosDesvinculo from '../components/PedidosDesvinculo';
 
-const FILTROS_PERFIL = ['TODOS', 'ATLETA', 'ORGANIZADOR'];
+/**
+ * Como cada perfil aparece na lista: rótulo, rótulo do filtro, cor e explicação (dica ao passar o mouse
+ * e texto exibido quando o filtro está selecionado).
+ */
+const PERFIS = {
+  ATLETA: {
+    rotulo: 'Atleta', filtro: 'Atletas', cor: '#00ff88',
+    explicacao: 'Atleta com cadastro e login no FairPlay.',
+  },
+  ORGANIZADOR: {
+    rotulo: 'Organizador', filtro: 'Organizadores', cor: '#00bfff',
+    explicacao: 'Organizador de eventos, com cadastro e login no FairPlay.',
+  },
+  HISTORICO: {
+    rotulo: 'Pendente (só histórico)', filtro: 'Pendentes do histórico', cor: '#ffd700',
+    explicacao: 'Criado automaticamente quando um organizador inscreveu alguém que só existe no histórico importado. '
+      + 'Não tem login. Se a pessoa criar uma conta e vincular essas competições, o registro é incorporado à conta dela.',
+  },
+  SEM_CADASTRO: {
+    rotulo: 'Inscrito sem cadastro', filtro: 'Sem cadastro', cor: '#a0aec0',
+    explicacao: 'Inscrito manualmente por um organizador, sem cadastro nem histórico. Não tem login. '
+      + 'Se a pessoa criar uma conta com o mesmo CPF, as inscrições passam para a conta dela.',
+  },
+};
+
+const FILTROS_PERFIL = ['TODOS', ...Object.keys(PERFIS)];
+
+/** Cor de fundo e de borda translúcidas a partir da cor do perfil (#rrggbb). */
+const translucido = (cor, opacidade) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(cor.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${opacidade})`;
+};
 
 export default function AdminUsuarios() {
   const navigate = useNavigate();
@@ -110,11 +141,15 @@ export default function AdminUsuarios() {
                   color: filtroPerfil === perfil ? '#ffffff' : '#8b949e',
                 }}
               >
-                {perfil}
+                {perfil === 'TODOS' ? 'Todos' : PERFIS[perfil].filtro}
               </button>
             ))}
           </div>
         </div>
+
+        {(filtroPerfil === 'HISTORICO' || filtroPerfil === 'SEM_CADASTRO') && (
+          <p style={styles.explicacaoFiltro}>ℹ️ {PERFIS[filtroPerfil].explicacao}</p>
+        )}
 
         {/* Tabela de Usuários */}
         <div style={styles.tableCard}>
@@ -156,14 +191,23 @@ export default function AdminUsuarios() {
                         <small style={{ color: '#718096' }}>{u.cidade ? `${u.cidade} - ${u.estado}` : 'Cidade não informada'}</small>
                       </td>
                       <td style={styles.td}>
-                        <span style={{
-                          ...styles.badge,
-                          backgroundColor: u.perfil === 'ATLETA' ? 'rgba(0, 255, 136, 0.12)' : 'rgba(0, 191, 255, 0.12)',
-                          color: u.perfil === 'ATLETA' ? '#00ff88' : '#00bfff',
-                          borderColor: u.perfil === 'ATLETA' ? 'rgba(0, 255, 136, 0.3)' : 'rgba(0, 191, 255, 0.3)',
-                        }}>
-                          {u.perfil}
-                        </span>
+                        {(() => {
+                          const perfil = PERFIS[u.perfil] || { rotulo: u.perfil, cor: '#a0aec0', explicacao: '' };
+                          return (
+                            <span
+                              title={perfil.explicacao}
+                              style={{
+                                ...styles.badge,
+                                backgroundColor: translucido(perfil.cor, 0.12),
+                                color: perfil.cor,
+                                borderColor: translucido(perfil.cor, 0.3),
+                                cursor: 'help',
+                              }}
+                            >
+                              {perfil.rotulo}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td style={{ ...styles.td, textAlign: 'center' }}>
                         {u.perfil === 'ORGANIZADOR' ? (
@@ -319,10 +363,21 @@ const styles = {
   },
   tabButtons: {
     display: 'flex',
+    flexWrap: 'wrap',
     gap: '8px',
   },
+  explicacaoFiltro: {
+    color: '#a0aec0',
+    fontSize: '0.84rem',
+    lineHeight: '1.5',
+    backgroundColor: '#111418',
+    border: '1px solid #22272e',
+    borderRadius: '8px',
+    padding: '10px 14px',
+    margin: '-6px 0 18px',
+  },
   filterBtn: {
-    padding: '0 16px',
+    padding: '10px 16px',
     borderRadius: '8px',
     border: '1px solid',
     cursor: 'pointer',
@@ -365,12 +420,14 @@ const styles = {
     color: '#cbd5e0',
   },
   badge: {
+    display: 'inline-block',
     padding: '4px 8px',
     borderRadius: '4px',
     border: '1px solid',
     fontSize: '0.72rem',
     fontWeight: '700',
     letterSpacing: '0.5px',
+    whiteSpace: 'nowrap',
   },
   acoes: {
     display: 'flex',
